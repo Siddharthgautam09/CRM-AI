@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RollupPeriod {
+  daily
+  monthly
+
+  @@map("rollup_period")
+}
+
+enum GraceOverageStatus {
+  OPEN
+  CLOSED
+
+  @@map("grace_overage_status")
+}
+
+model UsageSnapshot {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String       @map("tenant_id") @db.Uuid
+  snapshotAt DateTime     @map("snapshot_at") @db.Timestamptz(6)
+  period     RollupPeriod
+  metrics    Json
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, snapshotAt(sort: Desc)])
+  @@index([tenantId, period, snapshotAt(sort: Desc)])
+  @@map("usage_snapshot")
+}
+
+model UsageGraceOverage {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String             @map("tenant_id") @db.Uuid
+  metric         String             @db.VarChar(120)
+  graceStartedAt DateTime           @map("grace_started_at") @db.Timestamptz(6)
+  graceExpiresAt DateTime           @map("grace_expires_at") @db.Timestamptz(6)
+  overageCount   Int                @default(0) @map("overage_count")
+  status         GraceOverageStatus @default(OPEN)
+  billedAt       DateTime?          @map("billed_at") @db.Timestamptz(6)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, metric, status])
+  @@index([status, graceExpiresAt])
+  @@map("usage_grace_overage")
+}
+
+model UsageReconciliationLog {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  metric       String   @db.VarChar(120)
+  counterValue BigInt   @map("counter_value")
+  dbValue      BigInt   @map("db_value")
+  driftPct     Decimal  @map("drift_pct") @db.Decimal(6, 2)
+  corrected    Boolean
+  runAt        DateTime @default(now()) @map("run_at") @db.Timestamptz(6)
+
+  @@index([tenantId, runAt(sort: Desc)])
+  @@map("usage_reconciliation_log")
+}
+
+model UsageIdempotencyLedger {
+  eventId     String   @id @map("event_id") @db.VarChar(128)
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@map("usage_idempotency_ledger")
+}

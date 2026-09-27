@@ -1,0 +1,42 @@
+// packages/gen-sup-starter/prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+  output   = "../__generated__/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Announcement {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title         String    @db.VarChar(500)
+  body          String
+  type          String    @default("INFO") @db.VarChar(24)
+  targetSegment String    @default("ALL") @map("target_segment") @db.VarChar(64)
+  channels      String[]
+  scheduledFor  DateTime? @map("scheduled_for") @db.Timestamptz(6)
+  sentAt        DateTime? @map("sent_at") @db.Timestamptz(6)
+  createdBy     String    @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([sentAt])
+  @@index([scheduledFor])
+  @@map("announcements")
+}
+
+model RevenueSnapshot {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  period                  String   @db.VarChar(16)
+  capturedAt              DateTime @default(now()) @map("captured_at") @db.Timestamptz(6)
+  totalMrr                Float    @map("total_mrr")
+  totalArr                Float    @map("total_arr")
+  averageRevenuePerTenant Float    @map("average_revenue_per_tenant")
+  byPlan                  Json     @map("by_plan")
+  byRegion                Json     @map("by_region")
+  planDistribution        Json     @map("plan_distribution")
+
+  @@index([period, capturedAt])
+  @@map("revenue_snapshots")
+}

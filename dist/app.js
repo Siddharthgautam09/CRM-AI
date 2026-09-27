@@ -1,0 +1,32 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.app = void 0;
+const cookie_parser_1 = __importDefault(require("cookie-parser"));
+const express_1 = __importDefault(require("express"));
+const swagger_jsdoc_1 = __importDefault(require("swagger-jsdoc"));
+const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
+const env_1 = require("./config/env");
+const swagger_1 = require("./config/swagger");
+const error_handler_middleware_1 = require("./middlewares/error-handler.middleware");
+const not_found_middleware_1 = require("./middlewares/not-found.middleware");
+const request_context_middleware_1 = require("./middlewares/request-context.middleware");
+const request_logger_middleware_1 = require("./middlewares/request-logger.middleware");
+const security_middleware_1 = require("./middlewares/security.middleware");
+const routes_1 = require("./routes");
+const app = (0, express_1.default)();
+exports.app = app;
+const swaggerSpec = (0, swagger_jsdoc_1.default)(swagger_1.swaggerOptions);
+(0, security_middleware_1.applySecurityMiddlewares)(app);
+app.use((0, cookie_parser_1.default)());
+app.use(request_context_middleware_1.requestContextMiddleware);
+app.use(request_logger_middleware_1.requestLoggerMiddleware);
+app.get('/health', (_req, res) => {
+    res.status(200).json({ status: 'ok', app: env_1.env.appName, env: env_1.env.nodeEnv });
+});
+app.use('/docs', swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swaggerSpec));
+app.use(env_1.env.apiPrefix, routes_1.rootRouter);
+app.use(not_found_middleware_1.notFoundMiddleware);
+app.use(error_handler_middleware_1.errorHandlerMiddleware);

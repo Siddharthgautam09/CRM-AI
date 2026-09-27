@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.documentRouter = void 0;
+const express_1 = require("express");
+const document_controller_1 = require("./document.controller");
+const document_validation_1 = require("./document.validation");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const documentRouter = (0, express_1.Router)();
+exports.documentRouter = documentRouter;
+documentRouter.use(auth_middleware_1.authenticate);
+documentRouter.get('/', document_controller_1.listDocumentsHandler);
+documentRouter.get('/:id', (0, validate_middleware_1.validate)(document_validation_1.documentIdParamSchema), document_controller_1.getDocumentByIdHandler);
+documentRouter.post('/', (0, auth_middleware_1.authorize)('admin', 'editor'), (0, validate_middleware_1.validate)(document_validation_1.createDocumentSchema), document_controller_1.createDocumentHandler);
+documentRouter.patch('/:id', (0, auth_middleware_1.authorize)('admin', 'editor'), (0, validate_middleware_1.validate)(document_validation_1.updateDocumentSchema), document_controller_1.updateDocumentHandler);
+documentRouter.delete('/:id', (0, auth_middleware_1.authorize)('admin'), (0, validate_middleware_1.validate)(document_validation_1.documentIdParamSchema), document_controller_1.deleteDocumentHandler);
