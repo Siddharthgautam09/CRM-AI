@@ -1,0 +1,103 @@
+server:
+  port: 8102
+
+spring:
+  application:
+    name: modules-auth
+  main:
+    allow-bean-definition-overriding: true
+
+  datasource:
+    url: ${AUTH_DB_URL}
+    username: ${AUTH_DB_USERNAME}
+    password: ${AUTH_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  # gen-auth-starter runs its own independent Flyway instance against
+  # classpath:db/migration/genauth (table flyway_schema_history_auth).
+  # This app's own migrations (classpath:db/migration, the Boot default)
+  # run through this normal Spring Boot Flyway autoconfiguration instead —
+  # see ModAuthFlywayInitializer for the explicit ordering between the two.
+  flyway:
+    enabled: false # driven manually by ModAuthFlywayInitializer, see its javadoc
+
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1026}
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+# ── gen-auth-starter feature flags ─────────────────────────────────────────
+# Forgot-password reuses the starter's own magic-link flow as-is (diagram
+# match is exact: generic response regardless of email existing, expiring
+# token, password-rule violations surfaced on verify) — needs both flags on.
+app:
+  email:
+    enabled: true
+  magic-link:
+    enabled: true
+
+auth:
+  magic-link:
+    frontend-reset-url: ${FRONTEND_RESET_URL:http://localhost:3000/reset-password}
+
+jwt:
+  issuer: ${JWT_ISSUER:https://auth.example.com}
+  audience: ${JWT_AUDIENCE:example-api}
+  key-id: auth-key-v1
+  signing-mode: local
+  active-kid: auth-key-v1
+  access-token:
+    expiration-minutes: 15
+  refresh-token:
+    expiration-days: 7
+  keys:
+    - kid: auth-key-v1
+      private-key-path: classpath:keys/private.pem
+      public-key-path: classpath:keys/public.pem
+  key-encryption-secret: ${JWT_KEY_ENCRYPTION_SECRET}
+
+internal-service-secret: ${INTERNAL_SERVICE_SECRET}
+
+# ── Swagger / OpenAPI — same paths gen-auth-starter's SecurityConfig already
+# permits publicly (/v1/docs/**, /swagger-ui/**), so no security changes
+# needed. Combines this module's own annotated endpoints with every
+# springdoc-annotated endpoint gen-auth-starter exposes in the same JVM
+# (login, magic-link, etc.) into one spec.
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v1/docs/openapi.json
+  swagger-ui:
+    enabled: true
+    path: /v1/docs
+    operationsSorter: method
+    tagsSorter: alpha
+    disable-swagger-default-url: true
+    document-title: Auth Module API
+  show-actuator: false
+
+# ── this module's own config ───────────────────────────────────────────────
+modauth:
+  terms:
+    # Bumping this forces every user to re-accept terms on next login —
+    # matches the "have the terms changed since last login?" diagram gate.
+    current-version: 1
+  invitation:
+    ttl-days: 7
+    frontend-accept-url: ${FRONTEND_INVITE_ACCEPT_URL:http://localhost:3000/invitations/accept}

@@ -29,6 +29,62 @@ services:
     volumes:
       - mongo_data:/data/db
 
+  # ── modules/auth — the Java auth service (gen-auth-starter + this repo's
+  #    role/terms/invitation additions). Own Postgres/Redis/Mailhog so it
+  #    never touches the Node app's `postgres`/`mongodb` above. Every secret
+  #    below is a throwaway dev value, not meant for real deployments.
+  modauth:
+    build:
+      context: .
+      dockerfile: modules/auth/Dockerfile
+    ports:
+      - '8102:8102'
+    environment:
+      AUTH_DB_URL: jdbc:postgresql://auth-postgres:5432/auth_db
+      AUTH_DB_USERNAME: postgres
+      AUTH_DB_PASSWORD: postgres
+      REDIS_HOST: auth-redis
+      REDIS_PORT: '6379'
+      SMTP_HOST: mailhog
+      SMTP_PORT: '1025'
+      JWT_ISSUER: http://localhost:8102
+      JWT_AUDIENCE: modules-auth
+      # Must be valid base64 (KeyEncryptionUtil decodes it directly) — this is a
+      # throwaway dev value, generate your own with `openssl rand -base64 32`.
+      JWT_KEY_ENCRYPTION_SECRET: J2r6UKQCT8wKd94xnRw0eFI+HjtZwfR0Zeqk3hgmCaE=
+      INTERNAL_SERVICE_SECRET: dev-only-internal-secret-change-me
+      FRONTEND_RESET_URL: http://localhost:3000/reset-password
+      FRONTEND_INVITE_ACCEPT_URL: http://localhost:3000/invitations/accept
+    depends_on:
+      - auth-postgres
+      - auth-redis
+      - mailhog
+
+  auth-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '5433:5432'
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql/data
+
+  auth-redis:
+    image: redis:7-alpine
+    ports:
+      - '6380:6379'
+
+  # Catches every email this module sends (invitations, password resets) —
+  # web UI at http://localhost:8026, nothing actually leaves the machine.
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - '8026:8025'
+      - '1026:1025'
+
 volumes:
   postgres_data:
   mongo_data:
+  auth_postgres_data:

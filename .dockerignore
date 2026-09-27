@@ -3,3 +3,8 @@ dist
 coverage
 .git
 .env
+
+# Java build output — never ship the host's local build into the image;
+# modules/auth's Dockerfile runs `gradle bootJar` fresh inside the build stage.
+**/.gradle
+**/build
