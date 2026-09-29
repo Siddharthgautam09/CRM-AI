@@ -23,13 +23,26 @@ beforeEach(() => {
 const TENANT = 'tenant-1';
 
 describe('completeTask', () => {
-  it('404s a task belonging to a different broker', async () => {
+  it('404s a task outside the tenant entirely', async () => {
+    mockPrisma.task.findUnique.mockResolvedValue({
+      id: 't1',
+      tenantId: 'other-tenant',
+      brokerUserId: 'me',
+    });
+    await expect(completeTask(TENANT, 'me', 't1')).rejects.toMatchObject({ statusCode: 404 });
+    expect(mockPrisma.task.update).not.toHaveBeenCalled();
+  });
+
+  it('403s a task in-tenant but belonging to a different broker — "You don\'t have access to this record"', async () => {
     mockPrisma.task.findUnique.mockResolvedValue({
       id: 't1',
       tenantId: TENANT,
       brokerUserId: 'someone-else',
     });
-    await expect(completeTask(TENANT, 'me', 't1')).rejects.toMatchObject({ statusCode: 404 });
+    await expect(completeTask(TENANT, 'me', 't1')).rejects.toMatchObject({
+      statusCode: 403,
+      message: "You don't have access to this record",
+    });
     expect(mockPrisma.task.update).not.toHaveBeenCalled();
   });
 

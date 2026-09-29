@@ -26,10 +26,14 @@ export async function listMyTasks(tenantId: string, brokerUserId: string) {
   });
 }
 
+/** Same 404-vs-403 split as lead.service.ts's getLeadWithAccess: not-in-tenant is 404, someone else's is 403. */
 export async function completeTask(tenantId: string, brokerUserId: string, taskId: string) {
   const task = await getPrismaClient().task.findUnique({ where: { id: taskId } });
-  if (!task || task.tenantId !== tenantId || task.brokerUserId !== brokerUserId) {
+  if (!task || task.tenantId !== tenantId) {
     throw new ApiError('Task not found', 404);
+  }
+  if (task.brokerUserId !== brokerUserId) {
+    throw new ApiError("You don't have access to this record", 403);
   }
   return getPrismaClient().task.update({ where: { id: taskId }, data: { completed: true } });
 }

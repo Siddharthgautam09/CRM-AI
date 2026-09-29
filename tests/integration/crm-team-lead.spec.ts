@@ -345,7 +345,7 @@ describe("Flow 3 — a Broker's own book, HTTP layer", () => {
     expect(completeRes.body.data.completed).toBe(true);
   });
 
-  it("404s completing a task that isn't the caller's", async () => {
+  it("403s completing a task that isn't the caller's", async () => {
     mockBroker(BROKER_A);
     mockPrisma.task.findUnique.mockResolvedValue({
       id: 'task-1',
@@ -357,7 +357,7 @@ describe("Flow 3 — a Broker's own book, HTTP layer", () => {
       .patch(`${BASE}/tasks/11111111-1111-1111-1111-111111111111/complete`)
       .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     expect(mockPrisma.task.update).not.toHaveBeenCalled();
   });
 });
