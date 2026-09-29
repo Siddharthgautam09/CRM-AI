@@ -34,12 +34,14 @@ COPY --from=builder /app/dist ./dist
 # swagger-jsdoc reads these from disk at request time (config/swagger.ts's `apis`
 # glob), not from the compiled dist/ bundle — without them, /docs renders an empty
 # spec (confirmed: the UI shell loads fine either way, silently hiding the gap).
-# modules/platform is source .ts (not dist/'s compiled .js) so any future inline
-# @openapi JSDoc comment there still gets picked up in production, matching dev's
-# behavior. Not all of modules/ — modules/auth and modules/tenant are separate
-# Java/Gradle projects (their own Dockerfiles), irrelevant to this image.
+# modules/platform and modules/crm are source .ts (not dist/'s compiled .js) so
+# any future inline @openapi JSDoc comment there still gets picked up in
+# production, matching dev's behavior. Not all of modules/ — modules/auth and
+# modules/tenant are separate Java/Gradle projects (their own Dockerfiles),
+# irrelevant to this image.
 COPY docs ./docs
 COPY modules/platform ./modules/platform
+COPY modules/crm ./modules/crm
 COPY .env.example ./.env
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

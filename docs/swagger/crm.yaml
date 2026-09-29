@@ -1,0 +1,298 @@
+components:
+  securitySchemes:
+    crmBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        A Broker or Team Lead access token from modules/auth's
+        POST /api/v1/modauth/login. The caller's Role/team is resolved
+        server-side via modules/auth's internal lookup, not a JWT claim.
+  schemas:
+    Lead:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        brokerUserId: { type: string, format: uuid }
+        name: { type: string, example: Jamie Rivera }
+        email: { type: string, format: email, nullable: true }
+        phone: { type: string, nullable: true }
+        stage:
+          type: string
+          enum: [NEW, QUALIFIED, APPLICATION, UNDERWRITING, APPROVED, FUNDED, LOST]
+        lostReason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateLeadRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, example: Jamie Rivera }
+        email: { type: string, format: email }
+        phone: { type: string }
+    Task:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        brokerUserId: { type: string, format: uuid }
+        leadId: { type: string, format: uuid, nullable: true }
+        title: { type: string }
+        dueDate: { type: string, format: date-time, nullable: true }
+        completed: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        leadId: { type: string, format: uuid }
+        dueDate: { type: string, format: date-time }
+    BrokerWorkload:
+      type: object
+      description: >
+        One row per team member, including a broker with nothing assigned
+        (shown at zero, never omitted).
+      properties:
+        brokerUserId: { type: string, format: uuid }
+        brokerName: { type: string, nullable: true }
+        openLeads: { type: integer }
+        overdueTasks: { type: integer }
+        renewalsWithin90Days:
+          type: integer
+          description: Always 0 — no Mortgage/renewal model exists yet.
+        missingDocuments:
+          type: integer
+          description: Always 0 — no per-lead Document model exists yet.
+    TeamDashboard:
+      type: object
+      properties:
+        pipeline:
+          type: object
+          description: Lead count per stage across the whole team.
+          additionalProperties: { type: integer }
+        overdueTasks: { type: integer, description: Sum across every team member. }
+        workload:
+          type: array
+          items: { $ref: '#/components/schemas/BrokerWorkload' }
+
+paths:
+  /crm/leads:
+    post:
+      tags: [CRM]
+      summary: 'New client — "their own book"'
+      description: >
+        Minimal stand-in for Flow 4.1's full form (name/email/phone only) —
+        this module exists to make Flow 3's team-scoped views real, not to
+        implement the full Broker flow.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLeadRequest' }
+      responses:
+        '201':
+          description: Lead created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Lead' }
+    get:
+      tags: [CRM]
+      summary: My own leads/clients
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The caller's own book
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Lead' }
+
+  /crm/leads/{id}:
+    get:
+      tags: [CRM]
+      summary: One of my own leads
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The lead
+        '403':
+          description: "You don't have access to this record"
+        '404':
+          description: Not found
+
+  /crm/leads/{id}/stage:
+    patch:
+      tags: [CRM]
+      summary: Move a lead through the pipeline
+      description: A reason is required when moving to LOST.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stage]
+              properties:
+                stage:
+                  {
+                    type: string,
+                    enum: [NEW, QUALIFIED, APPLICATION, UNDERWRITING, APPROVED, FUNDED, LOST],
+                  }
+                lostReason: { type: string }
+      responses:
+        '200':
+          description: Updated
+        '400':
+          description: Missing lostReason when moving to LOST
+
+  /crm/tasks:
+    post:
+      tags: [CRM]
+      summary: Add a task
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTaskRequest' }
+      responses:
+        '201':
+          description: Task created
+    get:
+      tags: [CRM]
+      summary: My own tasks
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The caller's tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Task' }
+
+  /crm/tasks/{id}/complete:
+    patch:
+      tags: [CRM]
+      summary: Tick a task complete
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Completed
+        '404':
+          description: Not found
+
+  /crm/team/dashboard:
+    get:
+      tags: [CRM — Team Lead]
+      summary: 'Team dashboard — pipeline · overdue tasks · workload'
+      description: Team Lead only.
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/TeamDashboard' }
+        '403':
+          description: Caller is not a Team Lead, or has no team yet
+
+  /crm/team/book:
+    get:
+      tags: [CRM — Team Lead]
+      summary: 'Team book — every lead/client across the team'
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Every lead belonging to any broker on the team
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Lead' }
+
+  /crm/team/book/{id}:
+    get:
+      tags: [CRM — Team Lead]
+      summary: Open any lead in the team
+      description: Same access a broker would get. Blocked (403) for a lead outside the caller's team.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The lead
+        '403':
+          description: "You don't have access to this record — outside this team"
+
+  /crm/team/leads/{id}/reassign:
+    patch:
+      tags: [CRM — Team Lead]
+      summary: Reassign a lead to another broker on the team
+      description: The target broker must already be on the caller's team — otherwise 400 (not selectable).
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toBrokerUserId]
+              properties:
+                toBrokerUserId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Reassigned — recorded in the activity log
+        '400':
+          description: That broker is not on this team
+
+  /crm/team/tasks:
+    get:
+      tags: [CRM — Team Lead]
+      summary: Every task across the team's brokers
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Team tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Task' }

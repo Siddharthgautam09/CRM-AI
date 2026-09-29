@@ -186,4 +186,53 @@ class TeamServiceImplTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Not your brokerage's team");
     }
+
+    @Test
+    void tenantAdminCanViewAnyTeamInTheirTenant() {
+        TeamEntity team = TeamEntity.builder().id(UUID.randomUUID()).tenantId(tenantId).name("X").teamLeadUserId(leadId).build();
+        when(teamRepo.findById(team.getId())).thenReturn(Optional.of(team));
+        when(roleResolver.resolve(admin)).thenReturn(Role.TENANT_ADMIN);
+
+        TeamResponse response = service.get(admin, team.getId());
+
+        assertThat(response.id()).isEqualTo(team.getId());
+    }
+
+    @Test
+    void theTeamsOwnLeadCanViewItsRoster() {
+        TeamEntity team = TeamEntity.builder().id(UUID.randomUUID()).tenantId(tenantId).name("X").teamLeadUserId(leadId).build();
+        AuthenticatedUser leadCaller = new AuthenticatedUser(leadId, tenantId, "acme", List.of(), UserType.TENANT_USER,
+                "session", null, "jti");
+        when(teamRepo.findById(team.getId())).thenReturn(Optional.of(team));
+        when(roleResolver.resolve(leadCaller)).thenReturn(Role.TEAM_LEAD);
+
+        TeamResponse response = service.get(leadCaller, team.getId());
+
+        assertThat(response.id()).isEqualTo(team.getId());
+    }
+
+    @Test
+    void aDifferentTeamsLeadCannotViewThisRoster() {
+        TeamEntity team = TeamEntity.builder().id(UUID.randomUUID()).tenantId(tenantId).name("X").teamLeadUserId(leadId).build();
+        UUID otherLeadId = UUID.randomUUID();
+        AuthenticatedUser otherLeadCaller = new AuthenticatedUser(otherLeadId, tenantId, "acme", List.of(), UserType.TENANT_USER,
+                "session", null, "jti");
+        when(teamRepo.findById(team.getId())).thenReturn(Optional.of(team));
+        when(roleResolver.resolve(otherLeadCaller)).thenReturn(Role.TEAM_LEAD);
+
+        assertThatThrownBy(() -> service.get(otherLeadCaller, team.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Not allowed to view this team");
+    }
+
+    @Test
+    void aBrokerCannotViewTheTeamRoster() {
+        TeamEntity team = TeamEntity.builder().id(UUID.randomUUID()).tenantId(tenantId).name("X").teamLeadUserId(leadId).build();
+        when(teamRepo.findById(team.getId())).thenReturn(Optional.of(team));
+        when(roleResolver.resolve(admin)).thenReturn(Role.BROKER);
+
+        assertThatThrownBy(() -> service.get(admin, team.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Not allowed to view this team");
+    }
 }
