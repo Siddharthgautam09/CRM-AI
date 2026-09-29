@@ -17,3 +17,59 @@ model Document {
 
   @@index([ownerId])
 }
+
+// ── modules/platform (Super Admin flow) ─────────────────────────────────────
+
+// Gen_TNT tracks infra-provisioning status (PROVISIONING/ACTIVE/SUSPENDED/...);
+// this tracks the separate "has the owner accepted their invite yet?"
+// business state the console actually shows (PENDING vs Active) — updated to
+// ACTIVE by the webhook modules/auth calls after a TENANT_ADMIN invite is
+// accepted. See modules/platform/brokerage.service.ts.
+model BrokerageOnboarding {
+  tenantId     String   @id
+  invitationId String
+  status       String   @default("PENDING") // PENDING | ACTIVE
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Deliberately simple (a plain table, not the full Gen_Audit hash-chained
+// ledger service) — see project decision log. Swappable later without an API
+// change: same shape a "real" audit consumer would read off the
+// platform.audit exchange.
+model ActivityLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+}
+
+model BrokerageExportJob {
+  id          String    @id @default(uuid())
+  tenantId    String
+  status      String    @default("EXPORTING") // EXPORTING | READY | FAILED | EXPIRED | DELETED
+  filePath    String?
+  requestedAt DateTime  @default(now())
+  readyAt     DateTime?
+  expiresAt   DateTime?
+  deletedAt   DateTime?
+
+  @@index([tenantId])
+}
+
+// Backs AiCostLimitProvider (implements Gen_USG's ILimitProvider). A present,
+// unexpired row means "Allow extra for today" was clicked — getLimits()
+// returns AI_COST_OVERRIDE_LIMIT instead of AI_COST_DAILY_LIMIT until
+// expiresAt, then it reverts on its own ("resets by itself tomorrow"), no
+// cleanup job needed.
+model AiCostLimitOverride {
+  tenantId  String   @id
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+}

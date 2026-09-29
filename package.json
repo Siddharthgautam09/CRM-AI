@@ -25,10 +25,14 @@
     "validate": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "dependencies": {
+    "@gen-ms/gen-sup-starter": "file:./lib/Gen_Sup-main/packages/gen-sup-starter",
+    "@gen-ms/gen-usg-starter": "file:./lib/Gen_Usg-main/packages/gen-usg-starter",
     "@prisma/client": "^6.6.0",
+    "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^7.5.0",
@@ -49,6 +53,7 @@
   "devDependencies": {
     "@commitlint/cli": "^19.8.0",
     "@commitlint/config-conventional": "^19.8.0",
+    "@types/archiver": "^6.0.3",
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",
@@ -76,6 +81,9 @@
     "ts-jest": "^29.3.1",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "prisma", "esbuild", "@gen-ms/gen-sup-starter", "@gen-ms/gen-usg-starter"]
   },
   "lint-staged": {
     "*.{ts,js,json,md,yml,yaml}": [

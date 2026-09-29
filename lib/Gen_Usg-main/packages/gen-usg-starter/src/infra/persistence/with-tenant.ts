@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../../__generated__/prisma/index.js";
 import { getPrismaClient } from "./prisma-client.ts";
 import { InvalidTenantIdError } from "../../common/errors.ts";
 

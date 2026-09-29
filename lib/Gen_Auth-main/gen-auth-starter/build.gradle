@@ -176,6 +176,18 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+tasks.withType(JavaCompile).configureEach {
+    // Same fix gen-tnt-starter's build.gradle already applies, for the same
+    // reason: Spring MVC resolves unnamed @RequestParam/@PathVariable by
+    // reflecting on the compiled parameter name, which javac only retains
+    // with -parameters — normally added by the Spring Boot Gradle plugin,
+    // which this java-library module doesn't apply. Without it, any consumer
+    // hits "Name for argument of type [X] not specified" the first time an
+    // unnamed-parameter endpoint is actually invoked — confirmed by an actual
+    // 500 on GET /internal/auth/users/exists from modules/platform.
+    options.compilerArgs << '-parameters'
+}
+
 tasks.named('test') {
     useJUnitPlatform()
 }

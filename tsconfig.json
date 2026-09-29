@@ -27,5 +27,5 @@
     "typeRoots": ["./node_modules/@types", "./types"]
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist", "coverage"]
+  "exclude": ["node_modules", "dist", "coverage", "lib", "modules/auth", "modules/tenant"]
 }
