@@ -2,6 +2,11 @@
 generator client {
   provider = "prisma-client-js"
   output   = "../__generated__/prisma"
+  // Same fix as gen-usg-starter's schema.prisma, applied preemptively:
+  // Prisma 5.x's musl+OpenSSL auto-detection can guess openssl-1.1.x for a
+  // node:20-alpine (OpenSSL 3.x since Alpine 3.17+) runtime, which crashes
+  // at the first real query with "libssl.so.1.1: No such file or directory".
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {

@@ -1,6 +1,7 @@
 package com.example.modauth.service;
 
 import com.example.authsvc.application.service.RegisterService;
+import com.example.authsvc.domain.TenantConstants;
 import com.example.authsvc.domain.enums.UserType;
 import com.example.authsvc.infrastructure.security.principal.AuthenticatedUser;
 import com.example.authsvc.infrastructure.security.refresh.RefreshTokenHashUtil;
@@ -9,6 +10,7 @@ import com.example.modauth.domain.Role;
 import com.example.modauth.dto.AcceptInvitationRequest;
 import com.example.modauth.dto.AcceptInvitationResponse;
 import com.example.modauth.dto.CreateInvitationRequest;
+import com.example.modauth.dto.InternalCreateInvitationRequest;
 import com.example.modauth.dto.InvitationPreviewResponse;
 import com.example.modauth.dto.InvitationResponse;
 import com.example.modauth.entity.InvitationEntity;
@@ -28,6 +30,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
@@ -69,6 +75,15 @@ public class InvitationServiceImpl implements InvitationService {
     @Value("${modauth.terms.current-version:1}")
     private int currentTermsVersion;
 
+    /** Empty by default: platform-webhook notification is only meaningful when modules/platform is actually deployed. */
+    @Value("${modauth.platform-webhook-url:}")
+    private String platformWebhookUrl;
+
+    @Value("${internal-service-secret}")
+    private String internalServiceSecret;
+
+    private static final HttpClient WEBHOOK_CLIENT = HttpClient.newHttpClient();
+
     @Override
     @Transactional
     public InvitationResponse create(AuthenticatedUser inviter, CreateInvitationRequest request) {
@@ -79,28 +94,51 @@ public class InvitationServiceImpl implements InvitationService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "teamName is required for this role");
         }
 
-        String normalizedEmail = request.email().trim().toLowerCase();
-        if (userLookupRepo.findByEmail(normalizedEmail).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "This person already has an account here");
-        }
-
-        InvitationEntity invitation = InvitationEntity.builder()
-                .id(UUID.randomUUID())
-                .tenantId(inviter.getTenantId())
-                .inviterUserId(inviter.getUserId())
-                .name(request.name())
-                .email(normalizedEmail)
-                .role(request.role())
-                .teamName(request.teamName())
-                .status(InvitationStatus.PENDING)
-                .build();
-        issueToken(invitation);
+        InvitationEntity invitation = buildInvitation(
+                inviter.getTenantId(), inviter.getUserId(), request.name(), request.email(),
+                request.role(), request.teamName(), null);
         invitationRepo.save(invitation);
 
         sendInvitationEmail(invitation);
         log.info("invitation.created id={} tenantId={} role={}", invitation.getId(), invitation.getTenantId(), invitation.getRole());
 
         return toResponse(invitation);
+    }
+
+    @Override
+    @Transactional
+    public InvitationResponse createForBrokerageOwner(InternalCreateInvitationRequest request) {
+        InvitationEntity invitation = buildInvitation(
+                request.tenantId(), TenantConstants.SERVICE_ACCOUNT_ID, request.name(), request.email(),
+                Role.TENANT_ADMIN, null, request.preAllocatedUserId());
+        invitationRepo.save(invitation);
+
+        sendInvitationEmail(invitation);
+        log.info("invitation.created_for_brokerage_owner id={} tenantId={}", invitation.getId(), invitation.getTenantId());
+
+        return toResponse(invitation);
+    }
+
+    private InvitationEntity buildInvitation(UUID tenantId, UUID inviterUserId, String name, String email,
+                                             Role role, String teamName, UUID preAllocatedUserId) {
+        String normalizedEmail = email.trim().toLowerCase();
+        if (userLookupRepo.findByEmail(normalizedEmail).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This person already has an account here");
+        }
+
+        InvitationEntity invitation = InvitationEntity.builder()
+                .id(UUID.randomUUID())
+                .tenantId(tenantId)
+                .inviterUserId(inviterUserId)
+                .name(name)
+                .email(normalizedEmail)
+                .role(role)
+                .teamName(teamName)
+                .preAllocatedUserId(preAllocatedUserId)
+                .status(InvitationStatus.PENDING)
+                .build();
+        issueToken(invitation);
+        return invitation;
     }
 
     @Override
@@ -136,7 +174,8 @@ public class InvitationServiceImpl implements InvitationService {
         InvitationEntity invitation = findValidPendingInvitation(request.token());
 
         UUID userId = registerService.register(
-                invitation.getEmail(), request.newPassword(), invitation.getTenantId(), null, null, UserType.TENANT_USER);
+                invitation.getEmail(), request.newPassword(), invitation.getTenantId(), null,
+                invitation.getPreAllocatedUserId(), UserType.TENANT_USER);
 
         ModAuthUserRoleEntity roleRow = ModAuthUserRoleEntity.builder()
                 .userId(userId)
@@ -154,6 +193,10 @@ public class InvitationServiceImpl implements InvitationService {
         String nextStep = invitation.getRole() == Role.TENANT_ADMIN
                 ? "complete_brokerage_profile"
                 : "connect_email_calendar_optional";
+
+        if (invitation.getRole() == Role.TENANT_ADMIN) {
+            notifyPlatformOwnerAccepted(invitation.getTenantId());
+        }
 
         log.info("invitation.accepted id={} userId={}", invitation.getId(), userId);
         return new AcceptInvitationResponse(userId, invitation.getEmail(), invitation.getRole(),
@@ -206,6 +249,29 @@ public class InvitationServiceImpl implements InvitationService {
         } catch (Exception e) {
             log.warn("invitation.email_send_failed email={}", invitation.getEmail(), e);
         }
+    }
+
+    /**
+     * Best-effort, fire-and-forget — same pattern as TenantsService.publishSafely
+     * on the modules/platform side: a failure here shouldn't fail the owner's
+     * accept request, it just means modules/platform's BrokerageOnboarding row
+     * stays PENDING until someone notices (its own onboardingStatus is a
+     * separate, non-blocking display concern, not this transaction's job).
+     */
+    private void notifyPlatformOwnerAccepted(UUID tenantId) {
+        if (platformWebhookUrl == null || platformWebhookUrl.isBlank()) {
+            return;
+        }
+        HttpRequest request = HttpRequest.newBuilder(URI.create(platformWebhookUrl))
+                .header("Content-Type", "application/json")
+                .header("X-Internal-Secret", internalServiceSecret)
+                .POST(HttpRequest.BodyPublishers.ofString("{\"tenantId\":\"" + tenantId + "\"}"))
+                .build();
+        WEBHOOK_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.discarding())
+                .exceptionally(err -> {
+                    log.warn("invitation.platform_webhook_failed tenantId={}", tenantId, err);
+                    return null;
+                });
     }
 
     private Role resolveRole(AuthenticatedUser user) {

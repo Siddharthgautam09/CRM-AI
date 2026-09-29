@@ -74,6 +74,10 @@ public class InvitationEntity {
     @Column(name = "accepted_at")
     private Instant acceptedAt;
 
+    /** Only set for TENANT_ADMIN invites created by modules/platform — see V2 migration. */
+    @Column(name = "pre_allocated_user_id")
+    private UUID preAllocatedUserId;
+
     /**
      * The plaintext token, held only in memory between {@code issueToken} and
      * the email send that immediately follows it in the same request — never

@@ -51,10 +51,18 @@ app:
     enabled: true
   magic-link:
     enabled: true
+  # Platform console flow ("FLOW 1 — Super Admin") logs in through this
+  # module's own /api/v1/auth/super-admin/login. Requires app.email.enabled
+  # (above) — the bootstrap password is emailed, not printed anywhere.
+  super-admin:
+    enabled: true
 
 auth:
   magic-link:
     frontend-reset-url: ${FRONTEND_RESET_URL:http://localhost:3000/reset-password}
+  super-admin:
+    email: ${SUPER_ADMIN_EMAIL}
+    password: ${SUPER_ADMIN_PASSWORD}
 
 jwt:
   issuer: ${JWT_ISSUER:https://auth.example.com}
@@ -101,3 +109,7 @@ modauth:
   invitation:
     ttl-days: 7
     frontend-accept-url: ${FRONTEND_INVITE_ACCEPT_URL:http://localhost:3000/invitations/accept}
+  # Notified (fire-and-forget) after a TENANT_ADMIN invite is accepted, so the
+  # console's "did the owner accept?" state flips from Pending to Active.
+  # Blank/unset is fine — modules/platform isn't a hard dependency of this one.
+  platform-webhook-url: ${PLATFORM_WEBHOOK_URL:}

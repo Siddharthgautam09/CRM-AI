@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   app:
     build: .
@@ -7,9 +5,59 @@ services:
       - '3000:3000'
     env_file:
       - .env
+    environment:
+      NODE_ENV: development
+      PORT: '3000'
+      APP_NAME: Enterprise Backend Template
+      API_PREFIX: /api/v1
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+      LOG_LEVEL: info
+      JWT_ACCESS_SECRET: dev-only-access-secret-change-me-change-me
+      JWT_REFRESH_SECRET: dev-only-refresh-secret-change-me-change-me
+      BCRYPT_SALT_ROUNDS: '12'
+      DB_CLIENT: prisma
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/template_db
+      MONGODB_URI: mongodb://mongodb:27017/template_db
+      # ── modules/platform (Super Admin console) ──────────────────────────
+      AUTH_SERVICE_BASE_URL: http://modauth:8102
+      TENANT_SERVICE_BASE_URL: http://tenant:8103
+      INTERNAL_SERVICE_SECRET: dev-only-internal-secret-change-me
+      AUTH_JWT_ISSUER: http://localhost:8102
+      AUTH_JWT_AUDIENCE: modules-auth
+      BROKERAGE_EXPORT_DOWNLOAD_DAYS: '7'
+      BROKERAGE_EXPORT_RETENTION_DAYS: '30'
+      # ── modules/platform — usage & AI cost (Gen_USG) ─────────────────────
+      # genusg_app (not genusg, the migration superuser) — RLS-enforced,
+      # created by gen-usg-starter's own create_app_role migration.
+      USAGE_DATABASE_URL: postgresql://genusg_app:genusg_app@usage-postgres:5432/genusg
+      USAGE_REDIS_URL: redis://usage-redis:6379
+      AI_COST_DAILY_LIMIT: '50'
+      AI_COST_OVERRIDE_LIMIT: '100'
+      # Must match modules/auth/src/main/resources/keys/public.pem exactly —
+      # that's the private half of this same throwaway dev keypair.
+      AUTH_JWT_PUBLIC_KEY: |
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArjcOkeJc1ZklqDmn2/fr
+        EepdFjOnhIFRo85cDqBsVBx7nvedJsDgg1P8IQKtHXLBm/unG7buaCqQLfSA0TkG
+        GReqPunt2aARQdVCh4iKPHnrp2Xn98D4+lhEsUHqR/9U6xy0f6abB1zYx6fj+Gv3
+        I56T8oeu1INb+S+sq7YWEFEqRZzsvy/h4jHFsxF4D4eFUPAHcfO+fGUz0Gfs2Nke
+        IujxYfGykR+7Q9d7Baon1IOaar6vlPlUtFahek4vGKZdzpxjcs3KnPH+6gyqRs7Q
+        XxJwl6KWBTqgYT7dOOgJUVjSbYgBRZn3zy7k0XJEmw0qW7SJqzSbrqdzN3y3jKLe
+        tQIDAQAB
+        -----END PUBLIC KEY-----
     depends_on:
-      - postgres
-      - mongodb
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      modauth:
+        condition: service_started
+      tenant:
+        condition: service_started
+      usage-postgres:
+        condition: service_healthy
+      usage-redis:
+        condition: service_started
 
   postgres:
     image: postgres:16-alpine
@@ -21,6 +69,11 @@ services:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 20
 
   mongodb:
     image: mongo:7
@@ -55,10 +108,18 @@ services:
       INTERNAL_SERVICE_SECRET: dev-only-internal-secret-change-me
       FRONTEND_RESET_URL: http://localhost:3000/reset-password
       FRONTEND_INVITE_ACCEPT_URL: http://localhost:3000/invitations/accept
+      # FLOW 1 — Super Admin: bootstrap credentials, emailed once on first
+      # boot (check Mailhog at http://localhost:8026), not printed anywhere.
+      SUPER_ADMIN_EMAIL: superadmin@example.com
+      SUPER_ADMIN_PASSWORD: SuperAdmin@12345
+      PLATFORM_WEBHOOK_URL: http://app:3000/api/v1/platform/webhooks/owner-accepted
     depends_on:
-      - auth-postgres
-      - auth-redis
-      - mailhog
+      auth-postgres:
+        condition: service_healthy
+      auth-redis:
+        condition: service_started
+      mailhog:
+        condition: service_started
 
   auth-postgres:
     image: postgres:16-alpine
@@ -70,6 +131,11 @@ services:
       - '5433:5432'
     volumes:
       - auth_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 20
 
   auth-redis:
     image: redis:7-alpine
@@ -84,7 +150,78 @@ services:
       - '8026:8025'
       - '1026:1025'
 
+  # ── modules/tenant — Gen_TNT (brokerage/tenant CRUD + provisioning saga).
+  #    Own Postgres/Redis, same pattern as modauth above.
+  tenant:
+    build:
+      context: .
+      dockerfile: modules/tenant/Dockerfile
+    ports:
+      - '8103:8103'
+    environment:
+      TNT_DB_URL: jdbc:postgresql://tenant-postgres:5432/tenant_db
+      TNT_DB_USERNAME: postgres
+      TNT_DB_PASSWORD: postgres
+      TNT_REDIS_HOST: tenant-redis
+      TNT_REDIS_PORT: '6379'
+      INTERNAL_SERVICE_SECRET: dev-only-internal-secret-change-me
+    depends_on:
+      tenant-postgres:
+        condition: service_healthy
+      tenant-redis:
+        condition: service_started
+
+  tenant-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tenant_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '5434:5432'
+    volumes:
+      - tenant_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  tenant-redis:
+    image: redis:7-alpine
+    ports:
+      - '6381:6379'
+
+  # ── Gen_USG (usage & AI cost) — own Postgres/Redis. POSTGRES_USER=genusg
+  #    is a superuser (Postgres always makes the initdb bootstrap role one),
+  #    needed to run gen-usg-starter's RLS-setting migrations; the app itself
+  #    connects as the unprivileged genusg_app role those migrations create
+  #    (see USAGE_DATABASE_URL on the app service above and README.md for the
+  #    one-time `prisma migrate deploy` step against this container).
+  usage-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: genusg
+      POSTGRES_USER: genusg
+      POSTGRES_PASSWORD: genusg
+    ports:
+      - '5435:5432'
+    volumes:
+      - usage_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U genusg']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  usage-redis:
+    image: redis:7-alpine
+    ports:
+      - '6382:6379'
+
 volumes:
   postgres_data:
   mongo_data:
   auth_postgres_data:
+  tenant_postgres_data:
+  usage_postgres_data:

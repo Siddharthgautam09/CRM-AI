@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../../../__generated__/prisma/index.js";
 
 let client: PrismaClient | undefined;
 
