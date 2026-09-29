@@ -15,9 +15,11 @@ import com.example.modauth.dto.InvitationPreviewResponse;
 import com.example.modauth.dto.InvitationResponse;
 import com.example.modauth.entity.InvitationEntity;
 import com.example.modauth.entity.ModAuthUserRoleEntity;
+import com.example.modauth.entity.TeamEntity;
 import com.example.modauth.repository.InvitationJpaRepository;
 import com.example.modauth.repository.ModAuthUserLookupRepository;
 import com.example.modauth.repository.ModAuthUserRoleJpaRepository;
+import com.example.modauth.repository.TeamJpaRepository;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +40,6 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -61,7 +62,9 @@ public class InvitationServiceImpl implements InvitationService {
     private final InvitationJpaRepository invitationRepo;
     private final ModAuthUserRoleJpaRepository roleRepo;
     private final ModAuthUserLookupRepository userLookupRepo;
+    private final TeamJpaRepository teamRepo;
     private final RegisterService registerService;
+    private final RoleResolver roleResolver;
 
     @Autowired(required = false)
     private JavaMailSender mailSender;
@@ -87,16 +90,12 @@ public class InvitationServiceImpl implements InvitationService {
     @Override
     @Transactional
     public InvitationResponse create(AuthenticatedUser inviter, CreateInvitationRequest request) {
-        Role inviterRole = resolveRole(inviter);
+        Role inviterRole = roleResolver.resolve(inviter);
         requireCanInvite(inviterRole, request.role());
-
-        if (request.role() != Role.TENANT_ADMIN && (request.teamName() == null || request.teamName().isBlank())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "teamName is required for this role");
-        }
 
         InvitationEntity invitation = buildInvitation(
                 inviter.getTenantId(), inviter.getUserId(), request.name(), request.email(),
-                request.role(), request.teamName(), null);
+                request.role(), request.teamId(), null);
         invitationRepo.save(invitation);
 
         sendInvitationEmail(invitation);
@@ -120,10 +119,23 @@ public class InvitationServiceImpl implements InvitationService {
     }
 
     private InvitationEntity buildInvitation(UUID tenantId, UUID inviterUserId, String name, String email,
-                                             Role role, String teamName, UUID preAllocatedUserId) {
+                                             Role role, UUID teamId, UUID preAllocatedUserId) {
         String normalizedEmail = email.trim().toLowerCase();
         if (userLookupRepo.findByEmail(normalizedEmail).isPresent()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This person already has an account here");
+        }
+
+        // teamName is a denormalized display snapshot: real when teamId points at an
+        // actual team, otherwise left null (a Team Lead has no team until one is
+        // created for them — see TeamServiceImpl.create).
+        String teamName = null;
+        if (teamId != null) {
+            TeamEntity team = teamRepo.findById(teamId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "No such team"));
+            if (!team.getTenantId().equals(tenantId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not your brokerage's team");
+            }
+            teamName = team.getName();
         }
 
         InvitationEntity invitation = InvitationEntity.builder()
@@ -133,6 +145,7 @@ public class InvitationServiceImpl implements InvitationService {
                 .name(name)
                 .email(normalizedEmail)
                 .role(role)
+                .teamId(teamId)
                 .teamName(teamName)
                 .preAllocatedUserId(preAllocatedUserId)
                 .status(InvitationStatus.PENDING)
@@ -180,7 +193,9 @@ public class InvitationServiceImpl implements InvitationService {
         ModAuthUserRoleEntity roleRow = ModAuthUserRoleEntity.builder()
                 .userId(userId)
                 .tenantId(invitation.getTenantId())
+                .name(invitation.getName())
                 .role(invitation.getRole())
+                .teamId(invitation.getTeamId())
                 .teamName(invitation.getTeamName())
                 .acceptedTermsVersion(currentTermsVersion)
                 .build();
@@ -274,17 +289,6 @@ public class InvitationServiceImpl implements InvitationService {
                 });
     }
 
-    private Role resolveRole(AuthenticatedUser user) {
-        Optional<ModAuthUserRoleEntity> row = roleRepo.findById(user.getUserId());
-        if (row.isPresent()) {
-            return row.get().getRole();
-        }
-        if (user.getUserType() == UserType.SUPER_ADMIN) {
-            return Role.SUPER_ADMIN;
-        }
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No role assigned — cannot invite");
-    }
-
     // package-private (not private) so InvitationAuthorizationTest can exercise the matrix directly.
     static void requireCanInvite(Role inviterRole, Role inviteeRole) {
         boolean allowed = switch (inviterRole) {
@@ -302,6 +306,6 @@ public class InvitationServiceImpl implements InvitationService {
     private static InvitationResponse toResponse(InvitationEntity invitation) {
         return new InvitationResponse(
                 invitation.getId(), invitation.getName(), invitation.getEmail(), invitation.getRole(),
-                invitation.getTeamName(), invitation.getStatus(), invitation.getExpiresAt());
+                invitation.getTeamName(), invitation.getTeamId(), invitation.getStatus(), invitation.getExpiresAt());
     }
 }

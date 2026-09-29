@@ -14,6 +14,7 @@ public record InvitationResponse(
         String email,
         Role role,
         String teamName,
+        UUID teamId,
         InvitationStatus status,
         Instant expiresAt
 ) {
