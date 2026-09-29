@@ -66,8 +66,19 @@ const mockPrisma = {
     update: jest.fn(),
     groupBy: jest.fn(),
   },
-  task: { findMany: jest.fn() },
+  task: { create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
 };
+
+function mockBroker(userId: string) {
+  (getModAuthPerson as jest.Mock).mockResolvedValue({
+    userId,
+    tenantId: TENANT_ID,
+    role: 'BROKER',
+    teamId: null,
+    name: 'Bob Broker',
+    active: true,
+  });
+}
 
 function mockTeamLead() {
   (getModAuthPerson as jest.Mock).mockResolvedValue({
@@ -226,5 +237,155 @@ describe('Flow 3 — Team Lead, HTTP layer', () => {
 
     expect(res.status).toBe(400);
     expect(mockPrisma.lead.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("Flow 3 — a Broker's own book, HTTP layer", () => {
+  it('creates a lead, then lists and fetches it back', async () => {
+    mockBroker(BROKER_A);
+    mockPrisma.lead.create.mockResolvedValue({
+      id: 'lead-1',
+      brokerUserId: BROKER_A,
+      name: 'Jamie Rivera',
+    });
+
+    const createRes = await request(app)
+      .post(`${BASE}/leads`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`)
+      .send({ name: 'Jamie Rivera' });
+    expect(createRes.status).toBe(201);
+
+    mockPrisma.lead.findMany.mockResolvedValue([{ id: 'lead-1', brokerUserId: BROKER_A }]);
+    const listRes = await request(app)
+      .get(`${BASE}/leads`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data).toHaveLength(1);
+
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_A,
+    });
+    const getRes = await request(app)
+      .get(`${BASE}/leads/11111111-1111-1111-1111-111111111111`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+    expect(getRes.status).toBe(200);
+  });
+
+  it("403s a lead the caller doesn't own", async () => {
+    mockBroker(BROKER_A);
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_B_OUTSIDE_TEAM,
+    });
+
+    const res = await request(app)
+      .get(`${BASE}/leads/11111111-1111-1111-1111-111111111111`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('moves a lead through the pipeline', async () => {
+    mockBroker(BROKER_A);
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_A,
+    });
+    mockPrisma.lead.update.mockResolvedValue({ id: 'lead-1', stage: 'QUALIFIED' });
+
+    const res = await request(app)
+      .patch(`${BASE}/leads/11111111-1111-1111-1111-111111111111/stage`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`)
+      .send({ stage: 'QUALIFIED' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.stage).toBe('QUALIFIED');
+  });
+
+  it('rejects an invalid lead id (not a UUID) before hitting the service', async () => {
+    mockBroker(BROKER_A);
+    const res = await request(app)
+      .get(`${BASE}/leads/not-a-uuid`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+    expect(res.status).toBe(400);
+    expect(mockPrisma.lead.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('creates a task, lists it, then completes it', async () => {
+    mockBroker(BROKER_A);
+    mockPrisma.task.create.mockResolvedValue({ id: 'task-1', title: 'Follow up' });
+
+    const createRes = await request(app)
+      .post(`${BASE}/tasks`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`)
+      .send({ title: 'Follow up' });
+    expect(createRes.status).toBe(201);
+
+    mockPrisma.task.findMany.mockResolvedValue([{ id: 'task-1', completed: false }]);
+    const listRes = await request(app)
+      .get(`${BASE}/tasks`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data).toHaveLength(1);
+
+    mockPrisma.task.findUnique.mockResolvedValue({
+      id: 'task-1',
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_A,
+    });
+    mockPrisma.task.update.mockResolvedValue({ id: 'task-1', completed: true });
+    const completeRes = await request(app)
+      .patch(`${BASE}/tasks/11111111-1111-1111-1111-111111111111/complete`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+    expect(completeRes.status).toBe(200);
+    expect(completeRes.body.data.completed).toBe(true);
+  });
+
+  it("404s completing a task that isn't the caller's", async () => {
+    mockBroker(BROKER_A);
+    mockPrisma.task.findUnique.mockResolvedValue({
+      id: 'task-1',
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_B_OUTSIDE_TEAM,
+    });
+
+    const res = await request(app)
+      .patch(`${BASE}/tasks/11111111-1111-1111-1111-111111111111/complete`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+
+    expect(res.status).toBe(404);
+    expect(mockPrisma.task.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('Flow 3 — "Team tasks"', () => {
+  it("lists every task across the team's brokers", async () => {
+    mockTeamLead();
+    mockRoster();
+    mockPrisma.task.findMany.mockResolvedValue([{ id: 'task-1' }, { id: 'task-2' }]);
+
+    const res = await request(app)
+      .get(`${BASE}/team/tasks`)
+      .set('Authorization', `Bearer ${tokenFor(LEAD_USER_ID)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(mockPrisma.task.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: TENANT_ID, brokerUserId: { in: [LEAD_USER_ID, BROKER_A] } },
+      }),
+    );
+  });
+
+  it('a Broker cannot reach the team tasks route', async () => {
+    mockBroker(BROKER_A);
+    const res = await request(app)
+      .get(`${BASE}/team/tasks`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+    expect(res.status).toBe(403);
   });
 });

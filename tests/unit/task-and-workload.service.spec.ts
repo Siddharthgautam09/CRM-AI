@@ -1,11 +1,17 @@
 jest.mock('../../config/database');
 
 import { getPrismaClient } from '../../config/database';
-import { completeTask, overdueCountByBroker } from '../../modules/crm/task.service';
+import {
+  completeTask,
+  createTask,
+  listForBrokers,
+  listMyTasks,
+  overdueCountByBroker,
+} from '../../modules/crm/task.service';
 import { teamWorkload } from '../../modules/crm/workload.service';
 
 const mockPrisma = {
-  task: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  task: { create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   lead: { groupBy: jest.fn() },
 };
 
@@ -67,5 +73,48 @@ describe('teamWorkload — "a broker with nothing assigned is shown as empty rat
     });
     const b1 = workload.find((w) => w.brokerUserId === 'b1')!;
     expect(b1).toMatchObject({ openLeads: 4, overdueTasks: 1 });
+  });
+});
+
+describe('createTask', () => {
+  it('always creates the task against the caller, converting dueDate to a real Date', async () => {
+    mockPrisma.task.create.mockResolvedValue({ id: 't1' });
+    await createTask(TENANT, 'me', { title: 'Follow up', dueDate: '2026-10-01T00:00:00.000Z' });
+    const arg = mockPrisma.task.create.mock.calls[0][0];
+    expect(arg.data).toMatchObject({ tenantId: TENANT, brokerUserId: 'me', title: 'Follow up' });
+    expect(arg.data.dueDate).toBeInstanceOf(Date);
+  });
+
+  it('leaves dueDate null when none is given', async () => {
+    mockPrisma.task.create.mockResolvedValue({ id: 't1' });
+    await createTask(TENANT, 'me', { title: 'No date task' });
+    expect(mockPrisma.task.create.mock.calls[0][0].data.dueDate).toBeNull();
+  });
+});
+
+describe('listMyTasks', () => {
+  it("scopes to the caller's own tenant and broker id", async () => {
+    mockPrisma.task.findMany.mockResolvedValue([]);
+    await listMyTasks(TENANT, 'me');
+    expect(mockPrisma.task.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: TENANT, brokerUserId: 'me' } }),
+    );
+  });
+});
+
+describe('listForBrokers — "Team tasks"', () => {
+  it('returns nothing without hitting the DB when the team has no brokers', async () => {
+    const tasks = await listForBrokers(TENANT, []);
+    expect(tasks).toEqual([]);
+    expect(mockPrisma.task.findMany).not.toHaveBeenCalled();
+  });
+
+  it('lists tasks for every broker on the team', async () => {
+    mockPrisma.task.findMany.mockResolvedValue([{ id: 't1' }]);
+    const tasks = await listForBrokers(TENANT, ['b1', 'b2']);
+    expect(tasks).toHaveLength(1);
+    expect(mockPrisma.task.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: TENANT, brokerUserId: { in: ['b1', 'b2'] } } }),
+    );
   });
 });

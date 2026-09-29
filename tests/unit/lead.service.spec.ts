@@ -3,8 +3,10 @@ jest.mock('../../config/database');
 
 import { getPrismaClient } from '../../config/database';
 import {
+  createLead,
   getLeadWithAccess,
   listForBrokers,
+  listMyLeads,
   openLeadCountByBroker,
   pipelineCounts,
   reassign,
@@ -181,5 +183,31 @@ describe('listForBrokers — "Team book"', () => {
     const leads = await listForBrokers(TENANT, []);
     expect(leads).toEqual([]);
     expect(mockPrisma.lead.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('createLead — "New client"', () => {
+  it('always creates the lead against the caller, never an arbitrary broker', async () => {
+    mockPrisma.lead.create.mockResolvedValue({ id: 'lead-1' });
+    await createLead(TENANT, 'me', { name: 'Jamie Rivera', email: 'jamie@example.com' });
+    expect(mockPrisma.lead.create).toHaveBeenCalledWith({
+      data: {
+        tenantId: TENANT,
+        brokerUserId: 'me',
+        name: 'Jamie Rivera',
+        email: 'jamie@example.com',
+        phone: undefined,
+      },
+    });
+  });
+});
+
+describe('listMyLeads', () => {
+  it("scopes to the caller's own tenant and broker id", async () => {
+    mockPrisma.lead.findMany.mockResolvedValue([]);
+    await listMyLeads(TENANT, 'me');
+    expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: TENANT, brokerUserId: 'me' } }),
+    );
   });
 });
