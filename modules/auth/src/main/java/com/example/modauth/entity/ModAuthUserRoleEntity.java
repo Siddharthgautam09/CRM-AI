@@ -40,12 +40,19 @@ public class ModAuthUserRoleEntity {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
+    @Column(name = "name")
+    private String name;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
     private Role role;
 
     @Column(name = "team_name")
     private String teamName;
+
+    /** FK-by-convention to {@code modauth_teams.id} (no real FK, same loose coupling as tenantId). Null = not on a team. */
+    @Column(name = "team_id")
+    private UUID teamId;
 
     @Column(name = "accepted_terms_version", nullable = false)
     private int acceptedTermsVersion;

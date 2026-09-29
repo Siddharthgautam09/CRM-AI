@@ -57,6 +57,10 @@ public class InvitationEntity {
     @Column(name = "team_name")
     private String teamName;
 
+    /** Real team link when the invitee is joining an existing team (see modauth_teams); null otherwise. */
+    @Column(name = "team_id")
+    private UUID teamId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private InvitationStatus status;
