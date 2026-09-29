@@ -8,11 +8,19 @@ export const validate =
   (schema: AnyZodObject) =>
   (req: Request, _res: Response, next: NextFunction): void => {
     try {
-      schema.parse({
+      const parsed = schema.parse({
         body: req.body,
         query: req.query,
         params: req.params,
       });
+
+      // Without this, a schema's defaults/coercions (e.g. listBrokeragesSchema's
+      // page=0/size=20) are computed and then thrown away — confirmed by an
+      // actual test: GET /brokerages with no query string called
+      // listBrokerages(undefined, undefined) instead of (0, 20).
+      if (parsed.body !== undefined) req.body = parsed.body;
+      if (parsed.query !== undefined) req.query = parsed.query;
+      if (parsed.params !== undefined) req.params = parsed.params;
 
       next();
     } catch (error) {
