@@ -11,22 +11,26 @@ import { ApiError } from '../../utils/api-error';
  * against its public key — no network call back to the auth service per
  * request. Claim names match JwtUtils.java exactly (sub, user_type, ...).
  *
- * Only `user_type=SUPER_ADMIN` may pass: that's gen-auth-starter's own
- * first-class concept (a platform_super_admin row, a separate login path),
- * independent of this repo's own modauth_user_roles table — the Super Admin
- * flow diagrams are scoped to that one role.
+ * Shared with modules/crm's requireModAuthRole, which needs the same
+ * signature check before it can go on to resolve a modauth Role (Broker /
+ * Team Lead / Tenant Admin), which — unlike SUPER_ADMIN — isn't a JWT claim
+ * gen-auth-starter itself knows about.
  */
-export function requireSuperAdmin(req: Request, _res: Response, next: NextFunction): void {
+export function extractBearerToken(req: Request): string {
   const header = req.headers.authorization;
-  const token = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : req.cookies?.access_token;
-
+  const token = header?.startsWith('Bearer ')
+    ? header.slice('Bearer '.length)
+    : req.cookies?.access_token;
   if (!token) {
     throw new ApiError('Missing bearer token', StatusCodes.UNAUTHORIZED);
   }
+  return token;
+}
 
-  let payload: jwt.JwtPayload;
+export function verifyAuthToken(req: Request): jwt.JwtPayload {
+  const token = extractBearerToken(req);
   try {
-    payload = jwt.verify(token, env.platform.authJwtPublicKey, {
+    return jwt.verify(token, env.platform.authJwtPublicKey, {
       algorithms: ['RS256'],
       issuer: env.platform.authJwtIssuer,
       audience: env.platform.authJwtAudience,
@@ -34,6 +38,16 @@ export function requireSuperAdmin(req: Request, _res: Response, next: NextFuncti
   } catch {
     throw new ApiError('Invalid or expired token', StatusCodes.UNAUTHORIZED);
   }
+}
+
+/**
+ * Only `user_type=SUPER_ADMIN` may pass: that's gen-auth-starter's own
+ * first-class concept (a platform_super_admin row, a separate login path),
+ * independent of this repo's own modauth_user_roles table — the Super Admin
+ * flow diagrams are scoped to that one role.
+ */
+export function requireSuperAdmin(req: Request, _res: Response, next: NextFunction): void {
+  const payload = verifyAuthToken(req);
 
   if (payload.user_type !== 'SUPER_ADMIN') {
     throw new ApiError('Super admin access required', StatusCodes.FORBIDDEN);

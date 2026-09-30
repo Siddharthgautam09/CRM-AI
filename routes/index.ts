@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { crmRouter } from '../modules/crm/crm.routes';
 import { platformRouter } from '../modules/platform/platform.routes';
 
 const rootRouter = Router();
@@ -13,5 +14,8 @@ const rootRouter = Router();
 // (routes/index.ts referenced a module that no longer exists, which would
 // fail to compile). Removed rather than restored; ask if it needs to come back.
 rootRouter.use('/platform', platformRouter);
+// Flow 3 (Team Lead) + the minimal Flow 4 (Broker) core it needs — see
+// modules/crm's own scope notes for what's a deliberate stand-in.
+rootRouter.use('/crm', crmRouter);
 
 export { rootRouter };

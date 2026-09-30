@@ -67,10 +67,22 @@ public class TeamServiceImpl implements TeamService {
         return teamRepo.findByTenantId(admin.getTenantId()).stream().map(this::toResponse).toList();
     }
 
+    /**
+     * Unlike every other method here, this one isn't Tenant-Admin-only: a
+     * Team Lead can also fetch their own team's roster — modules/platform's
+     * CRM module needs this (forwarding the caller's own JWT) to resolve
+     * "who's on my team" for the Team Lead flow, without a second internal
+     * service-to-service endpoint duplicating this same query.
+     */
     @Override
-    public TeamResponse get(AuthenticatedUser admin, UUID teamId) {
-        roleResolver.requireTenantAdmin(admin);
-        return toResponse(requireOwnedTeam(admin.getTenantId(), teamId));
+    public TeamResponse get(AuthenticatedUser caller, UUID teamId) {
+        TeamEntity team = requireOwnedTeam(caller.getTenantId(), teamId);
+        Role role = roleResolver.resolve(caller);
+        boolean isThisTeamsLead = role == Role.TEAM_LEAD && caller.getUserId().equals(team.getTeamLeadUserId());
+        if (role != Role.TENANT_ADMIN && !isThisTeamsLead) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this team");
+        }
+        return toResponse(team);
     }
 
     @Override
