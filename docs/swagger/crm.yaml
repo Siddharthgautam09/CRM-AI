@@ -575,3 +575,116 @@ paths:
           description: Export is not ready yet
         '410':
           description: Download window has expired
+
+  /crm/integrations/google/connect:
+    get:
+      tags: [Google integration]
+      summary: 'Connect email/calendar — the Google OAuth consent URL'
+      description: Broker and Team Lead each connect their own Google account.
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The URL to redirect the browser to
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { type: object, properties: { url: { type: string } } }
+
+  /crm/integrations/google/callback:
+    get:
+      tags: [Google integration]
+      summary: OAuth callback
+      description: >
+        Public — Google redirects the browser here directly with no JWT.
+        `state` is the userId that started the connect flow.
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Connected
+        '400':
+          description: Unknown user for this connection attempt
+
+  /crm/integrations/google/status:
+    get:
+      tags: [Google integration]
+      summary: Is Google connected, and as which account?
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: '{ connected, googleEmail }'
+
+  /crm/integrations/google:
+    delete:
+      tags: [Google integration]
+      summary: Disconnect
+      security: [{ crmBearer: [] }]
+      responses:
+        '204':
+          description: Disconnected
+
+  /crm/appointments:
+    post:
+      tags: [Google integration]
+      summary: 'New appointment (Flow 4.8) — pushed to Google Calendar if connected, else CRM-only'
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, startTime, endTime]
+              properties:
+                title: { type: string }
+                startTime: { type: string, format: date-time }
+                endTime: { type: string, format: date-time }
+                leadId: { type: string, format: uuid }
+                attendeeEmails: { type: array, items: { type: string, format: email } }
+      responses:
+        '201':
+          description: Created — check pushedToGoogle to see whether it reached Calendar
+    get:
+      tags: [Google integration]
+      summary: My appointments
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The caller's appointments
+
+  /crm/team/calendar:
+    get:
+      tags: [CRM — Team Lead]
+      summary: Team calendar — every appointment across the team's brokers
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Team appointments
+
+  /crm/emails/send:
+    post:
+      tags: [Google integration]
+      summary: 'Sending an email (Flow 4.7)'
+      description: 400 ("Connect Gmail to send") if the broker hasn't connected Google yet.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, subject, body]
+              properties:
+                to: { type: string, format: email }
+                subject: { type: string }
+                body: { type: string }
+                leadId: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Sent — logged on the person's timeline (activity log)
+        '400':
+          description: Connect Gmail to send

@@ -36,6 +36,7 @@
     "express": "^4.21.2",
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^7.5.0",
+    "googleapis": "^182.0.0",
     "helmet": "^8.1.0",
     "hpp": "^0.2.3",
     "http-status-codes": "^2.3.0",
@@ -83,7 +84,14 @@
     "typescript": "^5.8.2"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "prisma", "esbuild", "@gen-ms/gen-sup-starter", "@gen-ms/gen-usg-starter"]
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "@gen-ms/gen-sup-starter",
+      "@gen-ms/gen-usg-starter"
+    ]
   },
   "lint-staged": {
     "*.{ts,js,json,md,yml,yaml}": [
