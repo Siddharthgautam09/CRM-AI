@@ -157,12 +157,7 @@ public class InvitationServiceImpl implements InvitationService {
     @Override
     @Transactional
     public InvitationResponse resend(AuthenticatedUser inviter, UUID invitationId) {
-        InvitationEntity invitation = invitationRepo.findById(invitationId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
-
-        if (!invitation.getTenantId().equals(inviter.getTenantId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not your brokerage's invitation");
-        }
+        InvitationEntity invitation = requireManageableInvitation(inviter, invitationId);
         if (invitation.getStatus() == InvitationStatus.ACCEPTED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Invitation already accepted");
         }
@@ -173,6 +168,35 @@ public class InvitationServiceImpl implements InvitationService {
         log.info("invitation.resent id={}", invitation.getId());
 
         return toResponse(invitation);
+    }
+
+    @Override
+    @Transactional
+    public void cancel(AuthenticatedUser inviter, UUID invitationId) {
+        InvitationEntity invitation = requireManageableInvitation(inviter, invitationId);
+        if (invitation.getStatus() == InvitationStatus.ACCEPTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Invitation already accepted");
+        }
+        invitationRepo.delete(invitation);
+        log.info("invitation.cancelled id={}", invitationId);
+    }
+
+    /**
+     * Same tenant as the caller, OR the caller is a Super Admin — a
+     * brokerage-owner invitation's inviter is a service account with the
+     * brokerage's own tenantId, not the Super Admin's, so the plain
+     * tenant-match check alone would lock Super Admin out of resending or
+     * cancelling the very invitations they created a brokerage for.
+     */
+    private InvitationEntity requireManageableInvitation(AuthenticatedUser inviter, UUID invitationId) {
+        InvitationEntity invitation = invitationRepo.findById(invitationId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
+
+        boolean sameTenant = invitation.getTenantId().equals(inviter.getTenantId());
+        if (!sameTenant && roleResolver.resolve(inviter) != Role.SUPER_ADMIN) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not your brokerage's invitation");
+        }
+        return invitation;
     }
 
     @Override

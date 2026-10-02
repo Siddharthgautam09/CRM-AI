@@ -14,11 +14,14 @@ import com.example.modauth.dto.ModLoginRequest;
 import com.example.modauth.entity.ModAuthUserRoleEntity;
 import com.example.modauth.repository.ModAuthUserLookupRepository;
 import com.example.modauth.repository.ModAuthUserRoleJpaRepository;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -32,6 +35,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -51,6 +55,7 @@ class ModAuthLoginServiceImplTest {
     @Mock private LockoutService lockoutService;
     @Mock private PasswordHasher passwordHasher;
     @Mock private LoginExecutionService loginExecutor;
+    @Mock private JavaMailSender mailSender;
 
     private ModAuthLoginServiceImpl service;
 
@@ -101,6 +106,37 @@ class ModAuthLoginServiceImplTest {
 
         verify(loginExecutor).handleFailure(user.getTenantId(), user.getId(), EMAIL, IP, UA, "INVALID_CREDENTIALS");
         verify(lockoutService, never()).recordFailure(anyString(), anyString());
+    }
+
+    @Test
+    void failureThatJustTriggersLockoutSendsAWarningEmail() {
+        ReflectionTestUtils.setField(service, "mailSender", mailSender);
+        AuthUserEntity user = activeUser();
+        when(userLookupRepo.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+        when(passwordHasher.verify(eq(PASSWORD), eq("hashed"))).thenReturn(false);
+        // First call (top of login) proves not-yet-locked; second call (right after
+        // handleFailure) throws — the exact transition this attempt just caused.
+        doNothing().doThrow(new AccountLockedException()).when(lockoutService).checkLockout(EMAIL, IP);
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
+
+        assertThatThrownBy(() -> service.login(request(false), IP, UA))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        verify(mailSender).send(any(MimeMessage.class));
+    }
+
+    @Test
+    void failureThatDoesNotTriggerLockoutSendsNoEmail() {
+        ReflectionTestUtils.setField(service, "mailSender", mailSender);
+        AuthUserEntity user = activeUser();
+        when(userLookupRepo.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+        when(passwordHasher.verify(eq(PASSWORD), eq("hashed"))).thenReturn(false);
+        // Both checkLockout calls succeed — still has failures left, not locked yet.
+
+        assertThatThrownBy(() -> service.login(request(false), IP, UA))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        verify(mailSender, never()).send(any(MimeMessage.class));
     }
 
     @Test

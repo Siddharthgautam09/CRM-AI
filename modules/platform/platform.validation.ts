@@ -49,3 +49,15 @@ export const simulateUsageSchema = z.object({
   query: z.object({}).optional(),
   params: z.object({ id: z.string().uuid() }),
 });
+
+export const activityLogQuerySchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({
+    action: z.string().max(100).optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    page: z.coerce.number().int().min(0).default(0),
+    size: z.coerce.number().int().min(1).max(100).default(20),
+  }),
+  params: z.object({}).optional(),
+});
