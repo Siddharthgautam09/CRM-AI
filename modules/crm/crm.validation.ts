@@ -78,3 +78,51 @@ export const taskIdParamSchema = z.object({
   query: z.object({}).optional(),
   params: z.object({ id: z.string().uuid() }),
 });
+
+const REPORT_TYPES = ['pipeline', 'renewals', 'team-performance', 'ai-usage'] as const;
+
+export const reportQuerySchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({
+    type: z.enum(REPORT_TYPES),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    brokerId: z.string().uuid().optional(),
+    teamId: z.string().uuid().optional(),
+  }),
+  params: z.object({}).optional(),
+});
+
+export const updateProfileSchema = z.object({
+  body: z.object({
+    displayName: z.string().max(255).optional(),
+    supportEmail: z.string().email().optional(),
+    phone: z.string().max(50).optional(),
+    address: z.string().max(500).optional(),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});
+
+const SLUG = /^[a-z0-9-]+$/;
+
+export const updateBookingSettingsSchema = z.object({
+  body: z.object({
+    slug: z
+      .string()
+      .min(3)
+      .max(100)
+      .regex(SLUG, 'lowercase letters, numbers and hyphens only')
+      .optional(),
+    enabled: z.boolean().optional(),
+    bufferMinutes: z.coerce.number().int().min(0).max(240).optional(),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});
+
+export const exportJobIdParamSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({}).optional(),
+  params: z.object({ jobId: z.string().uuid() }),
+});

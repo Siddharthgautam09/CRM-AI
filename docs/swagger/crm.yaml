@@ -407,3 +407,171 @@ paths:
                   data:
                     type: array
                     items: { $ref: '#/components/schemas/Task' }
+
+  /crm/reports:
+    get:
+      tags: [Reports]
+      summary: 'Pick one: renewals · AI usage · pipeline · team performance'
+      description: >
+        Tenant Admin scopes to every person in the brokerage by default
+        (narrow with teamId or brokerId); Team Lead is always scoped to
+        their own team (narrow with brokerId). ai-usage ignores both
+        filters — Gen_USG tracks per tenant, not per broker.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [pipeline, renewals, team-performance, ai-usage] }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: brokerId, in: query, schema: { type: string, format: uuid } }
+        - name: teamId
+          in: query
+          description: Tenant Admin only.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Report data — an empty/zeroed result when nothing matches ("Nothing to show, try a wider range").
+        '403':
+          description: brokerId is outside the caller's scope, or a Team Lead has no team
+
+  /crm/reports/export:
+    get:
+      tags: [Reports]
+      summary: 'Export as a spreadsheet — the export itself is recorded'
+      description: Same parameters as GET /crm/reports. Returns a CSV download.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [pipeline, renewals, team-performance, ai-usage] }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: brokerId, in: query, schema: { type: string, format: uuid } }
+        - { name: teamId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+
+  /crm/tenant/profile:
+    get:
+      tags: [Tenant Admin]
+      summary: Brokerage profile
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The brokerage's profile (empty defaults if never set)
+    patch:
+      tags: [Tenant Admin]
+      summary: Update the brokerage profile
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string }
+                supportEmail: { type: string, format: email }
+                phone: { type: string }
+                address: { type: string }
+      responses:
+        '200':
+          description: Updated
+
+  /crm/tenant/booking-settings:
+    get:
+      tags: [Tenant Admin]
+      summary: Booking page setup
+      description: Settings/config only — no public scheduling/availability engine behind this.
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Current settings (disabled defaults if never set up)
+    patch:
+      tags: [Tenant Admin]
+      summary: Update the booking page setup
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                slug:
+                  {
+                    type: string,
+                    example: acme-realty,
+                    description: Lowercase letters,
+                    numbers and hyphens only.,
+                  }
+                enabled: { type: boolean }
+                bufferMinutes: { type: integer, minimum: 0, maximum: 240 }
+      responses:
+        '200':
+          description: Updated
+        '400':
+          description: A slug is required on first setup
+        '409':
+          description: That slug is already taken by another brokerage
+
+  /crm/tenant/book:
+    get:
+      tags: [Tenant Admin]
+      summary: Every lead and client across the brokerage
+      description: No team filter — every person in the tenant, not just one team.
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Every lead in the tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Lead' }
+
+  /crm/tenant/export:
+    post:
+      tags: [Tenant Admin]
+      summary: 'Export all our data — self-service, distinct from the Super Admin cancellation export'
+      description: Packages the tenant's own leads/clients, their mortgages, and tasks.
+      security: [{ crmBearer: [] }]
+      responses:
+        '201':
+          description: Export job started
+    get:
+      tags: [Tenant Admin]
+      summary: Latest export status
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The latest export job, or null if none has been started
+
+  /crm/tenant/export/{jobId}/download:
+    get:
+      tags: [Tenant Admin]
+      summary: Download the export
+      description: 403 if jobId isn't this tenant's current (latest) export.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The zip file
+        '403':
+          description: Not your brokerage's export
+        '409':
+          description: Export is not ready yet
+        '410':
+          description: Download window has expired

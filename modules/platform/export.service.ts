@@ -3,7 +3,6 @@ import { createWriteStream } from 'node:fs';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-
 import type { BrokerageExportJobDto, TenantRecord } from './platform.types';
 import { getPrismaClient } from '../../config/database';
 import { env } from '../../config/env';
@@ -44,20 +43,25 @@ function buildManifest(tenant: TenantRecord): Record<string, unknown> {
   };
 }
 
-export async function startExport(tenant: TenantRecord): Promise<BrokerageExportJobDto> {
+async function runExportJob(
+  tenantId: string,
+  buildJobManifest: () => Promise<Record<string, unknown>> | Record<string, unknown>,
+): Promise<BrokerageExportJobDto> {
   await mkdir(EXPORT_DIR, { recursive: true });
 
   const job = await getPrismaClient().brokerageExportJob.create({
-    data: { tenantId: tenant.id, status: 'EXPORTING' },
+    data: { tenantId, status: 'EXPORTING' },
   });
 
   const filePath = path.join(EXPORT_DIR, `${job.id}.zip`);
 
   try {
-    await writeZip(filePath, buildManifest(tenant));
+    await writeZip(filePath, await buildJobManifest());
     const now = new Date();
     const readyAt = now;
-    const expiresAt = new Date(now.getTime() + env.platform.exportDownloadDays * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(
+      now.getTime() + env.platform.exportDownloadDays * 24 * 60 * 60 * 1000,
+    );
 
     const updated = await getPrismaClient().brokerageExportJob.update({
       where: { id: job.id },
@@ -73,6 +77,26 @@ export async function startExport(tenant: TenantRecord): Promise<BrokerageExport
   }
 }
 
+export async function startExport(tenant: TenantRecord): Promise<BrokerageExportJobDto> {
+  return runExportJob(tenant.id, () => buildManifest(tenant));
+}
+
+/**
+ * Tenant Admin's self-service "Export all our data" (Flow 2) — distinct
+ * from the Super-Admin-triggered cancellation export above: this one
+ * packages the tenant's actual CRM data (leads/clients, their mortgages,
+ * tasks), which didn't exist when that export was first written.
+ */
+export async function startSelfServiceExport(tenantId: string): Promise<BrokerageExportJobDto> {
+  return runExportJob(tenantId, async () => {
+    const [leads, tasks] = await Promise.all([
+      getPrismaClient().lead.findMany({ where: { tenantId }, include: { mortgages: true } }),
+      getPrismaClient().task.findMany({ where: { tenantId } }),
+    ]);
+    return { exportedAt: new Date().toISOString(), tenantId, leads, tasks };
+  });
+}
+
 function writeZip(filePath: string, manifest: Record<string, unknown>): Promise<void> {
   return new Promise((resolve, reject) => {
     const output = createWriteStream(filePath);
@@ -85,7 +109,9 @@ function writeZip(filePath: string, manifest: Record<string, unknown>): Promise<
   });
 }
 
-export async function getLatestExportForTenant(tenantId: string): Promise<BrokerageExportJobDto | null> {
+export async function getLatestExportForTenant(
+  tenantId: string,
+): Promise<BrokerageExportJobDto | null> {
   const row = await getPrismaClient().brokerageExportJob.findFirst({
     where: { tenantId },
     orderBy: { requestedAt: 'desc' },
@@ -94,7 +120,9 @@ export async function getLatestExportForTenant(tenantId: string): Promise<Broker
 }
 
 export async function getDownloadPath(jobId: string): Promise<string> {
-  const row = await getPrismaClient().brokerageExportJob.findUniqueOrThrow({ where: { id: jobId } });
+  const row = await getPrismaClient().brokerageExportJob.findUniqueOrThrow({
+    where: { id: jobId },
+  });
   if (row.status !== 'READY' || !row.filePath) {
     throw new ApiError('Export is not ready for download', 409);
   }

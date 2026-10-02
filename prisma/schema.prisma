@@ -138,6 +138,27 @@ model Mortgage {
   @@index([maturityDate])
 }
 
+// Tenant Admin's own settings screen (Flow 2) — a handful of display
+// fields, not a full business-profile system.
+model TenantProfile {
+  tenantId     String   @id
+  displayName  String?
+  supportEmail String?
+  phone        String?
+  address      String?
+  updatedAt    DateTime @updatedAt
+}
+
+// Booking page setup, settings/config only (per the agreed scope) — no
+// real public scheduling/availability engine behind it yet.
+model BookingPageSettings {
+  tenantId      String   @id
+  slug          String   @unique
+  enabled       Boolean  @default(false)
+  bufferMinutes Int      @default(15)
+  updatedAt     DateTime @updatedAt
+}
+
 model Task {
   id           String    @id @default(uuid())
   tenantId     String

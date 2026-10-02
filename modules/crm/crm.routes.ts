@@ -22,12 +22,27 @@ import {
   addMortgageSchema,
   createLeadSchema,
   createTaskSchema,
+  exportJobIdParamSchema,
   fundLeadSchema,
   leadIdParamSchema,
   reassignSchema,
+  reportQuerySchema,
   taskIdParamSchema,
+  updateBookingSettingsSchema,
+  updateProfileSchema,
   updateStageSchema,
 } from './crm.validation';
+import { exportReportHandler, getReportHandler } from './reports.controller';
+import {
+  downloadSelfServiceExportHandler,
+  getBookingSettingsHandler,
+  getProfileHandler,
+  getSelfServiceExportStatusHandler,
+  startSelfServiceExportHandler,
+  tenantBookHandler,
+  updateBookingSettingsHandler,
+  updateProfileHandler,
+} from './tenant.controller';
 import { validate } from '../../middlewares/validate.middleware';
 
 // Full OpenAPI docs live in docs/swagger/crm.yaml — see config/swagger.ts's apis list.
@@ -97,5 +112,53 @@ crmRouter.patch(
   reassignLeadHandler,
 );
 crmRouter.get('/team/tasks', requireModAuthRole('TEAM_LEAD'), teamTasksHandler);
+
+// Reports — shared by Tenant Admin (tenant-wide, or narrowed by team/broker)
+// and Team Lead (always team-scoped). See reports.controller.ts.
+crmRouter.get(
+  '/reports',
+  requireModAuthRole('TENANT_ADMIN', 'TEAM_LEAD'),
+  validate(reportQuerySchema),
+  getReportHandler,
+);
+crmRouter.get(
+  '/reports/export',
+  requireModAuthRole('TENANT_ADMIN', 'TEAM_LEAD'),
+  validate(reportQuerySchema),
+  exportReportHandler,
+);
+
+// Tenant Admin's remaining Flow 2 screens.
+crmRouter.get('/tenant/profile', requireModAuthRole('TENANT_ADMIN'), getProfileHandler);
+crmRouter.patch(
+  '/tenant/profile',
+  requireModAuthRole('TENANT_ADMIN'),
+  validate(updateProfileSchema),
+  updateProfileHandler,
+);
+crmRouter.get(
+  '/tenant/booking-settings',
+  requireModAuthRole('TENANT_ADMIN'),
+  getBookingSettingsHandler,
+);
+crmRouter.patch(
+  '/tenant/booking-settings',
+  requireModAuthRole('TENANT_ADMIN'),
+  validate(updateBookingSettingsSchema),
+  updateBookingSettingsHandler,
+);
+crmRouter.get('/tenant/book', requireModAuthRole('TENANT_ADMIN'), tenantBookHandler);
+crmRouter.post('/tenant/export', requireModAuthRole('TENANT_ADMIN'), startSelfServiceExportHandler);
+crmRouter.get(
+  '/tenant/export',
+  requireModAuthRole('TENANT_ADMIN'),
+  getSelfServiceExportStatusHandler,
+);
+crmRouter.get(
+  '/tenant/export/:jobId/download',
+  requireModAuthRole('TENANT_ADMIN'),
+  validate(exportJobIdParamSchema),
+  downloadSelfServiceExportHandler,
+);
 
 export { crmRouter };
