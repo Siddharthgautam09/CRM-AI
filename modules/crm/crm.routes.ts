@@ -14,6 +14,7 @@ import {
   reassignLeadHandler,
   teamBookDetailHandler,
   teamBookHandler,
+  teamCalendarHandler,
   teamDashboardHandler,
   teamTasksHandler,
   updateMyLeadStageHandler,
@@ -32,6 +33,20 @@ import {
   updateProfileSchema,
   updateStageSchema,
 } from './crm.validation';
+import {
+  createAppointmentHandler,
+  disconnectHandler,
+  getConnectUrlHandler,
+  getConnectionStatusHandler,
+  listMyAppointmentsHandler,
+  oauthCallbackHandler,
+  sendEmailHandler,
+} from './google/google.controller';
+import {
+  createAppointmentSchema,
+  oauthCallbackSchema,
+  sendEmailSchema,
+} from './google/google.validation';
 import { exportReportHandler, getReportHandler } from './reports.controller';
 import {
   downloadSelfServiceExportHandler,
@@ -112,6 +127,7 @@ crmRouter.patch(
   reassignLeadHandler,
 );
 crmRouter.get('/team/tasks', requireModAuthRole('TEAM_LEAD'), teamTasksHandler);
+crmRouter.get('/team/calendar', requireModAuthRole('TEAM_LEAD'), teamCalendarHandler);
 
 // Reports — shared by Tenant Admin (tenant-wide, or narrowed by team/broker)
 // and Team Lead (always team-scoped). See reports.controller.ts.
@@ -159,6 +175,48 @@ crmRouter.get(
   requireModAuthRole('TENANT_ADMIN'),
   validate(exportJobIdParamSchema),
   downloadSelfServiceExportHandler,
+);
+
+// "Connect email/calendar" (Flow 4.12) — Broker and Team Lead both have their
+// own book, so both can connect their own Google account.
+crmRouter.get(
+  '/integrations/google/connect',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  getConnectUrlHandler,
+);
+// Public: Google redirects the browser here directly, with no JWT — see
+// google.controller.ts's oauthCallbackHandler doc comment.
+crmRouter.get('/integrations/google/callback', validate(oauthCallbackSchema), oauthCallbackHandler);
+crmRouter.get(
+  '/integrations/google/status',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  getConnectionStatusHandler,
+);
+crmRouter.delete(
+  '/integrations/google',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  disconnectHandler,
+);
+
+// "New appointment" (Flow 4.8).
+crmRouter.post(
+  '/appointments',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(createAppointmentSchema),
+  createAppointmentHandler,
+);
+crmRouter.get(
+  '/appointments',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  listMyAppointmentsHandler,
+);
+
+// "Sending an email" (Flow 4.7) — 400 if Gmail isn't connected.
+crmRouter.post(
+  '/emails/send',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(sendEmailSchema),
+  sendEmailHandler,
 );
 
 export { crmRouter };

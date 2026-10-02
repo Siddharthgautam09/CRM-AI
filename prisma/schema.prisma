@@ -110,6 +110,7 @@ model Lead {
   updatedAt       DateTime  @updatedAt
   tasks           Task[]
   mortgages       Mortgage[]
+  appointments    Appointment[]
 
   // No teamId column: "which team is this lead's broker on" is resolved live
   // against modules/auth (the source of truth for team membership) rather
@@ -173,4 +174,38 @@ model Task {
   @@index([tenantId])
   @@index([brokerUserId])
   @@index([leadId])
+}
+
+// "Connect email/calendar" (Flow 4.12) — one Google account per broker/team
+// lead. accessToken/refreshToken are AES-256-GCM ciphertext (see
+// modules/crm/google/token-encryption.ts), never plaintext at rest.
+model GoogleConnection {
+  userId       String   @id
+  tenantId     String
+  googleEmail  String?
+  accessToken  String
+  refreshToken String
+  scope        String
+  expiresAt    DateTime
+  connectedAt  DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// A meeting (Flow 4.8). googleEventId stays null — "stays in the CRM only" —
+// until/unless the owning broker has a GoogleConnection to push it to.
+model Appointment {
+  id            String   @id @default(uuid())
+  tenantId      String
+  brokerUserId  String
+  leadId        String?
+  title         String
+  startTime     DateTime
+  endTime       DateTime
+  googleEventId String?
+  createdAt     DateTime @default(now())
+  lead          Lead?    @relation(fields: [leadId], references: [id])
+
+  @@index([tenantId])
+  @@index([brokerUserId])
+  @@index([startTime])
 }

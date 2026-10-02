@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 
+import * as calendarService from './google/calendar.service';
 import * as leadService from './lead.service';
 import { resolveTeam } from './modauth.client';
 import * as taskService from './task.service';
@@ -151,4 +152,12 @@ export const teamTasksHandler = asyncHandler(async (req: Request, res: Response)
   const team = await requireOwnTeam(req);
   const tasks = await taskService.listForBrokers(user.tenantId, team.brokerIds);
   res.status(StatusCodes.OK).json({ success: true, data: tasks });
+});
+
+/** "Team calendar" — every meeting across the team's brokers (closes Flow 3's one remaining gap). */
+export const teamCalendarHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const team = await requireOwnTeam(req);
+  const appointments = await calendarService.listForBrokers(user.tenantId, team.brokerIds);
+  res.status(StatusCodes.OK).json({ success: true, data: appointments });
 });
