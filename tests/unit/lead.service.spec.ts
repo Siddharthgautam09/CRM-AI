@@ -3,9 +3,12 @@ jest.mock('../../config/database');
 
 import { getPrismaClient } from '../../config/database';
 import {
+  addMortgage,
   createLead,
+  fundLead,
   getLeadWithAccess,
   listForBrokers,
+  listMyClients,
   listMyLeads,
   openLeadCountByBroker,
   pipelineCounts,
@@ -22,6 +25,10 @@ const mockPrisma = {
     update: jest.fn(),
     groupBy: jest.fn(),
   },
+  mortgage: {
+    create: jest.fn(),
+  },
+  $transaction: jest.fn(),
 };
 
 beforeEach(() => {
@@ -202,12 +209,100 @@ describe('createLead — "New client"', () => {
   });
 });
 
-describe('listMyLeads', () => {
-  it("scopes to the caller's own tenant and broker id", async () => {
+describe('listMyLeads — "Leads (not funded yet)"', () => {
+  it("scopes to the caller's own tenant and broker id, excluding Funded/Lost", async () => {
     mockPrisma.lead.findMany.mockResolvedValue([]);
     await listMyLeads(TENANT, 'me');
     expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { tenantId: TENANT, brokerUserId: 'me' } }),
+      expect.objectContaining({
+        where: { tenantId: TENANT, brokerUserId: 'me', stage: { notIn: ['FUNDED', 'LOST'] } },
+      }),
     );
+  });
+});
+
+describe('listMyClients — "Clients (funded)"', () => {
+  it('scopes to Funded leads only and includes their mortgages', async () => {
+    mockPrisma.lead.findMany.mockResolvedValue([]);
+    await listMyClients(TENANT, 'me');
+    expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: TENANT, brokerUserId: 'me', stage: 'FUNDED' },
+        include: { mortgages: true },
+      }),
+    );
+  });
+});
+
+describe('fundLead — "Change the stage to Funded"', () => {
+  it('creates the mortgage and moves the stage to FUNDED in one transaction', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+    });
+    mockPrisma.$transaction.mockResolvedValue([
+      { id: 'mortgage-1' },
+      { id: 'lead-1', stage: 'FUNDED' },
+    ]);
+
+    const result = await fundLead(TENANT, 'lead-1', ['me'], {
+      lender: 'Acme Bank',
+      interestRate: 4.5,
+      balance: 300000,
+      monthlyPayment: 1500,
+      maturityDate: '2031-01-01T00:00:00.000Z',
+    });
+
+    expect(result.stage).toBe('FUNDED');
+    expect(mockPrisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('blocks a direct FUNDED transition through updateStage', async () => {
+    await expect(updateStage(TENANT, 'lead-1', ['me'], 'FUNDED')).rejects.toMatchObject({
+      statusCode: 400,
+    });
+    expect(mockPrisma.lead.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('addMortgage', () => {
+  it('rejects adding a mortgage to a lead that is not yet Funded', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      stage: 'NEW',
+    });
+
+    await expect(
+      addMortgage(TENANT, 'lead-1', ['me'], {
+        lender: 'Acme Bank',
+        interestRate: 4.5,
+        balance: 300000,
+        monthlyPayment: 1500,
+        maturityDate: '2031-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('allows a second mortgage on an already-funded client', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      stage: 'FUNDED',
+    });
+    mockPrisma.mortgage.create.mockResolvedValue({ id: 'mortgage-2' });
+
+    const result = await addMortgage(TENANT, 'lead-1', ['me'], {
+      lender: 'Second Bank',
+      interestRate: 5,
+      balance: 100000,
+      monthlyPayment: 600,
+      maturityDate: '2029-01-01T00:00:00.000Z',
+    });
+
+    expect(result.id).toBe('mortgage-2');
   });
 });

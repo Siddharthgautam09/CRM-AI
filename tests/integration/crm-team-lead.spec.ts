@@ -67,6 +67,8 @@ const mockPrisma = {
     groupBy: jest.fn(),
   },
   task: { create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  mortgage: { create: jest.fn(), findMany: jest.fn() },
+  $transaction: jest.fn(),
 };
 
 function mockBroker(userId: string) {
@@ -104,6 +106,7 @@ function mockRoster() {
 beforeEach(() => {
   jest.clearAllMocks();
   (getPrismaClient as jest.Mock).mockReturnValue(mockPrisma);
+  mockPrisma.mortgage.findMany.mockResolvedValue([]);
 });
 
 describe('Flow 3 — Team Lead, HTTP layer', () => {
@@ -387,5 +390,104 @@ describe('Flow 3 — "Team tasks"', () => {
       .get(`${BASE}/team/tasks`)
       .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
     expect(res.status).toBe(403);
+  });
+});
+
+describe('Flow 4 core — funding a lead into a client', () => {
+  const mortgageBody = {
+    lender: 'Acme Bank',
+    interestRate: 4.5,
+    balance: 300000,
+    monthlyPayment: 1500,
+    maturityDate: '2031-01-01T00:00:00.000Z',
+  };
+
+  it('funds a lead and the client shows up under /clients, not /leads', async () => {
+    mockBroker(BROKER_A);
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_A,
+    });
+    mockPrisma.$transaction.mockResolvedValue([
+      { id: 'mortgage-1' },
+      { id: 'lead-1', stage: 'FUNDED' },
+    ]);
+
+    const fundRes = await request(app)
+      .post(`${BASE}/leads/11111111-1111-1111-1111-111111111111/fund`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`)
+      .send(mortgageBody);
+
+    expect(fundRes.status).toBe(200);
+    expect(fundRes.body.data.stage).toBe('FUNDED');
+
+    mockPrisma.lead.findMany.mockResolvedValue([{ id: 'lead-1', stage: 'FUNDED' }]);
+    const clientsRes = await request(app)
+      .get(`${BASE}/clients`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
+    expect(clientsRes.status).toBe(200);
+    expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ stage: 'FUNDED' }) }),
+    );
+  });
+
+  it('rejects funding without mortgage details (cannot be skipped)', async () => {
+    mockBroker(BROKER_A);
+    const res = await request(app)
+      .post(`${BASE}/leads/11111111-1111-1111-1111-111111111111/fund`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`)
+      .send({ lender: 'Acme Bank' }); // missing rate/balance/payment/maturityDate
+
+    expect(res.status).toBe(400);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('blocks a direct stage=FUNDED through the plain stage-update endpoint', async () => {
+    mockBroker(BROKER_A);
+    const res = await request(app)
+      .patch(`${BASE}/leads/11111111-1111-1111-1111-111111111111/stage`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`)
+      .send({ stage: 'FUNDED' });
+
+    expect(res.status).toBe(400);
+    expect(mockPrisma.lead.update).not.toHaveBeenCalled();
+  });
+
+  it('adds a second mortgage to an already-funded client', async () => {
+    mockBroker(BROKER_A);
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_A,
+      stage: 'FUNDED',
+    });
+    mockPrisma.mortgage.create.mockResolvedValue({ id: 'mortgage-2' });
+
+    const res = await request(app)
+      .post(`${BASE}/leads/11111111-1111-1111-1111-111111111111/mortgages`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`)
+      .send(mortgageBody);
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.id).toBe('mortgage-2');
+  });
+
+  it('rejects adding a mortgage to a lead that is not yet funded', async () => {
+    mockBroker(BROKER_A);
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_A,
+      stage: 'NEW',
+    });
+
+    const res = await request(app)
+      .post(`${BASE}/leads/11111111-1111-1111-1111-111111111111/mortgages`)
+      .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`)
+      .send(mortgageBody);
+
+    expect(res.status).toBe(400);
+    expect(mockPrisma.mortgage.create).not.toHaveBeenCalled();
   });
 });

@@ -13,11 +13,13 @@ import { teamWorkload } from '../../modules/crm/workload.service';
 const mockPrisma = {
   task: { create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   lead: { groupBy: jest.fn() },
+  mortgage: { findMany: jest.fn() },
 };
 
 beforeEach(() => {
   jest.clearAllMocks();
   (getPrismaClient as jest.Mock).mockReturnValue(mockPrisma);
+  mockPrisma.mortgage.findMany.mockResolvedValue([]);
 });
 
 const TENANT = 'tenant-1';
