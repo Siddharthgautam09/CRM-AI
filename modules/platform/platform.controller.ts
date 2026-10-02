@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 
+import { exportActivityCsv, listActivity } from './activity-log';
 import {
   createBrokerage,
   getBrokerage,
@@ -73,4 +74,41 @@ export const allowExtraTodayHandler = asyncHandler(async (req: Request, res: Res
 export const simulateUsageHandler = asyncHandler(async (req: Request, res: Response) => {
   const result = await simulateUsage(req.params.id as string, req.body.deltaUsdCents);
   res.status(StatusCodes.OK).json({ success: true, data: result });
+});
+
+export const getMeHandler = asyncHandler(async (req: Request, res: Response) => {
+  res.status(StatusCodes.OK).json({ success: true, data: req.platformUser });
+});
+
+interface ActivityLogQuery {
+  action?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  size?: number;
+}
+
+function parseActivityFilter(req: Request) {
+  const { action, from, to, page, size } = req.query as unknown as ActivityLogQuery;
+  return {
+    action,
+    from: from ? new Date(from) : undefined,
+    to: to ? new Date(to) : undefined,
+    page,
+    size,
+  };
+}
+
+export const listActivityHandler = asyncHandler(async (req: Request, res: Response) => {
+  const result = await listActivity(parseActivityFilter(req));
+  res.status(StatusCodes.OK).json({ success: true, data: result.items, total: result.total });
+});
+
+export const exportActivityHandler = asyncHandler(async (req: Request, res: Response) => {
+  const csv = await exportActivityCsv(parseActivityFilter(req), req.platformUser!.userId);
+  res
+    .status(StatusCodes.OK)
+    .set('Content-Type', 'text/csv')
+    .set('Content-Disposition', 'attachment; filename="activity-log.csv"')
+    .send(csv);
 });

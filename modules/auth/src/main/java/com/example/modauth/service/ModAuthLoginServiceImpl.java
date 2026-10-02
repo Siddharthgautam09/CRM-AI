@@ -4,6 +4,7 @@ import com.example.authsvc.api.dto.request.LoginRequest;
 import com.example.authsvc.api.dto.response.LoginResult;
 import com.example.authsvc.application.service.LockoutService;
 import com.example.authsvc.application.service.LoginExecutionService;
+import com.example.authsvc.common.exception.AccountLockedException;
 import com.example.authsvc.common.exception.InvalidCredentialsException;
 import com.example.authsvc.domain.enums.UserType;
 import com.example.authsvc.infrastructure.persistence.entity.AuthUserEntity;
@@ -13,10 +14,14 @@ import com.example.modauth.dto.ModLoginRequest;
 import com.example.modauth.entity.ModAuthUserRoleEntity;
 import com.example.modauth.repository.ModAuthUserLookupRepository;
 import com.example.modauth.repository.ModAuthUserRoleJpaRepository;
+import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -44,6 +49,9 @@ public class ModAuthLoginServiceImpl implements ModAuthLoginService {
     private final LockoutService lockoutService;
     private final PasswordHasher passwordHasher;
     private final LoginExecutionService loginExecutor;
+
+    @Autowired(required = false)
+    private JavaMailSender mailSender;
 
     @Value("${modauth.terms.current-version:1}")
     private int currentTermsVersion;
@@ -73,6 +81,7 @@ public class ModAuthLoginServiceImpl implements ModAuthLoginService {
                     userOpt.map(AuthUserEntity::getId).orElse(null),
                     email, ipAddress, userAgent, "INVALID_CREDENTIALS");
             log.warn("modauth.login.invalid_credentials email={} ip={}", email, ipAddress);
+            warnIfJustLockedOut(email, ipAddress);
             throw new InvalidCredentialsException();
         }
 
@@ -115,5 +124,42 @@ public class ModAuthLoginServiceImpl implements ModAuthLoginService {
 
         log.info("modauth.login.success userId={} role={}", user.getId(), role);
         return ModAuthLoginResult.success(role, dashboard, result);
+    }
+
+    /**
+     * checkLockout() at the top of login() already proved this email/ip
+     * wasn't locked before this attempt — calling it again right after
+     * handleFailure() (which internally calls recordFailure()) is a
+     * side-effect-free way to tell "just got locked by this attempt" from
+     * "still has failures left", without gen-auth-starter needing to
+     * expose a new read-only check or change recordFailure's return type.
+     */
+    private void warnIfJustLockedOut(String email, String ipAddress) {
+        try {
+            lockoutService.checkLockout(email, ipAddress);
+        } catch (AccountLockedException e) {
+            sendLockoutWarningEmail(email);
+        }
+    }
+
+    private void sendLockoutWarningEmail(String email) {
+        // ponytail: plain JavaMailSender, same as InvitationServiceImpl's
+        // invitation email — upgrade to gen-auth-starter's EmailProvider
+        // pattern if this needs to match the rest of the product's styling.
+        if (mailSender == null) {
+            log.info("modauth.login.lockout_email_skipped_no_mail_sender email={}", email);
+            return;
+        }
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message);
+            helper.setTo(email);
+            helper.setSubject("Your account was temporarily locked");
+            helper.setText("We locked your account for 15 minutes after 5 failed login attempts.\n\n"
+                    + "If this wasn't you, consider changing your password once you're back in.");
+            mailSender.send(message);
+        } catch (Exception e) {
+            log.warn("modauth.login.lockout_email_send_failed email={}", email, e);
+        }
     }
 }

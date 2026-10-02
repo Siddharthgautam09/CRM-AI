@@ -16,6 +16,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -60,6 +61,16 @@ public class InvitationController {
     public InvitationResponse resend(@AuthenticationPrincipal AuthenticatedUser inviter,
                                       @PathVariable UUID id) {
         return invitationService.resend(inviter, id);
+    }
+
+    @Operation(summary = "Cancel an invitation", description = "\"Resend, or cancel the invitation\" while it's still pending.")
+    @ApiResponse(responseCode = "204", description = "Invitation cancelled")
+    @ApiResponse(responseCode = "409", description = "Invitation was already accepted")
+    @SecurityRequirement(name = "bearerAuth")
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void cancel(@AuthenticationPrincipal AuthenticatedUser inviter, @PathVariable UUID id) {
+        invitationService.cancel(inviter, id);
     }
 
     @Operation(summary = "Preview an invitation", description = "Public — reached straight from the invitation email, "

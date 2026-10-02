@@ -37,7 +37,12 @@ export const activityLogEventPublisher: EventPublisher = {
 /** For events outside gen-sup-starter's own routingKey vocabulary (AI-cost overrides, exports, ...). */
 export async function recordActivity(
   action: string,
-  opts: { actorId?: string; targetType?: string; targetId?: string; metadata?: Record<string, unknown> } = {},
+  opts: {
+    actorId?: string;
+    targetType?: string;
+    targetId?: string;
+    metadata?: Record<string, unknown>;
+  } = {},
 ): Promise<void> {
   await getPrismaClient().activityLog.create({
     data: {
@@ -48,4 +53,71 @@ export async function recordActivity(
       metadata: (opts.metadata ?? undefined) as never,
     },
   });
+}
+
+export interface ActivityLogFilter {
+  action?: string;
+  from?: Date;
+  to?: Date;
+  page?: number;
+  size?: number;
+}
+
+/** "Filtered and exported" — the Super Admin console's read side of the log every recordActivity call writes into. */
+export async function listActivity(filter: ActivityLogFilter = {}) {
+  const page = filter.page ?? 0;
+  const size = filter.size ?? 20;
+  const where = {
+    ...(filter.action ? { action: filter.action } : {}),
+    ...(filter.from || filter.to
+      ? {
+          createdAt: {
+            ...(filter.from ? { gte: filter.from } : {}),
+            ...(filter.to ? { lte: filter.to } : {}),
+          },
+        }
+      : {}),
+  };
+  const [items, total] = await Promise.all([
+    getPrismaClient().activityLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: page * size,
+      take: size,
+    }),
+    getPrismaClient().activityLog.count({ where }),
+  ]);
+  return { items, total };
+}
+
+/** "The export is itself recorded" — same rule as every other export in this app. */
+export async function exportActivityCsv(
+  filter: ActivityLogFilter,
+  actorId: string,
+): Promise<string> {
+  const { items } = await listActivity({ ...filter, page: 0, size: 10000 });
+  const rows = items.map((r) => ({
+    id: r.id,
+    action: r.action,
+    actorId: r.actorId,
+    targetType: r.targetType,
+    targetId: r.targetId,
+    createdAt: r.createdAt.toISOString(),
+  }));
+  const csv = toCsv(rows);
+  await recordActivity('platform.activity_log.exported', {
+    actorId,
+    metadata: { action: filter.action },
+  });
+  return csv;
+}
+
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (rows.length === 0) return '';
+  const headers = Object.keys(rows[0]!);
+  const lines = [headers.join(',')];
+  for (const row of rows) {
+    lines.push(headers.map((h) => JSON.stringify(row[h] ?? '')).join(','));
+  }
+  return lines.join('\n');
 }

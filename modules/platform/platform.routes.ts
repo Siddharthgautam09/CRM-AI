@@ -6,9 +6,12 @@ import {
   allowExtraTodayHandler,
   createBrokerageHandler,
   downloadExportHandler,
+  exportActivityHandler,
   getBrokerageHandler,
   getExportStatusHandler,
+  getMeHandler,
   getUsageStatusHandler,
+  listActivityHandler,
   listBrokeragesHandler,
   ownerAcceptedWebhookHandler,
   reactivateBrokerageHandler,
@@ -17,6 +20,7 @@ import {
   suspendBrokerageHandler,
 } from './platform.controller';
 import {
+  activityLogQuerySchema,
   brokerageIdParamSchema,
   createBrokerageSchema,
   listBrokeragesSchema,
@@ -46,16 +50,50 @@ platformRouter.use(requireSuperAdmin);
 platformRouter.post('/brokerages', validate(createBrokerageSchema), createBrokerageHandler);
 platformRouter.get('/brokerages', validate(listBrokeragesSchema), listBrokeragesHandler);
 platformRouter.get('/brokerages/:id', validate(brokerageIdParamSchema), getBrokerageHandler);
-platformRouter.patch('/brokerages/:id/suspend', validate(suspendBrokerageSchema), suspendBrokerageHandler);
-platformRouter.patch('/brokerages/:id/reactivate', validate(reactivateBrokerageSchema), reactivateBrokerageHandler);
-platformRouter.patch('/brokerages/:id/cancel', validate(brokerageIdParamSchema), startCancellationHandler);
-platformRouter.get('/brokerages/:id/export', validate(brokerageIdParamSchema), getExportStatusHandler);
+platformRouter.patch(
+  '/brokerages/:id/suspend',
+  validate(suspendBrokerageSchema),
+  suspendBrokerageHandler,
+);
+platformRouter.patch(
+  '/brokerages/:id/reactivate',
+  validate(reactivateBrokerageSchema),
+  reactivateBrokerageHandler,
+);
+platformRouter.patch(
+  '/brokerages/:id/cancel',
+  validate(brokerageIdParamSchema),
+  startCancellationHandler,
+);
+platformRouter.get(
+  '/brokerages/:id/export',
+  validate(brokerageIdParamSchema),
+  getExportStatusHandler,
+);
 platformRouter.get('/exports/:jobId/download', downloadExportHandler);
 
 // "Watching AI cost" — Gen_USG.
-platformRouter.get('/brokerages/:id/usage', validate(brokerageIdParamSchema), getUsageStatusHandler);
-platformRouter.post('/brokerages/:id/usage/allow-extra-today', validate(brokerageIdParamSchema), allowExtraTodayHandler);
+platformRouter.get(
+  '/brokerages/:id/usage',
+  validate(brokerageIdParamSchema),
+  getUsageStatusHandler,
+);
+platformRouter.post(
+  '/brokerages/:id/usage/allow-extra-today',
+  validate(brokerageIdParamSchema),
+  allowExtraTodayHandler,
+);
 // Demo/test-only — see usage.service.ts's simulateUsage doc comment.
-platformRouter.post('/brokerages/:id/usage/simulate', validate(simulateUsageSchema), simulateUsageHandler);
+platformRouter.post(
+  '/brokerages/:id/usage/simulate',
+  validate(simulateUsageSchema),
+  simulateUsageHandler,
+);
+
+// "My settings" and the Activity log's read side (every recordActivity call
+// writes into it; nothing read it back before this).
+platformRouter.get('/me', getMeHandler);
+platformRouter.get('/activity-log', validate(activityLogQuerySchema), listActivityHandler);
+platformRouter.get('/activity-log/export', validate(activityLogQuerySchema), exportActivityHandler);
 
 export { platformRouter };

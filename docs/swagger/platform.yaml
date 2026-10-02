@@ -53,7 +53,7 @@ components:
         outcome: { type: string, enum: [ALLOW, SOFT_WARN_80, SOFT_WARN_95, GRACE, BLOCK] }
         paused:
           type: boolean
-          description: "true once BLOCK — \"has this brokerage hit its daily cost limit?\""
+          description: 'true once BLOCK — "has this brokerage hit its daily cost limit?"'
         current: { type: number, example: 60 }
         limit: { type: number, example: 50 }
         pct: { type: number, example: 120 }
@@ -261,7 +261,7 @@ paths:
   /platform/brokerages/{id}/usage:
     get:
       tags: [Platform]
-      summary: "Watching AI cost — has this brokerage hit its daily cost limit?"
+      summary: 'Watching AI cost — has this brokerage hit its daily cost limit?'
       description: Reads current status only (delta=0) — never records usage itself.
       security: [{ superAdminBearer: [] }]
       parameters:
@@ -354,3 +354,45 @@ paths:
       responses:
         '204': { description: Onboarding marked ACTIVE }
         '401': { description: Unauthorized }
+
+  /platform/me:
+    get:
+      tags: [Platform]
+      summary: My settings — the caller's own identity
+      security: [{ superAdminBearer: [] }]
+      responses:
+        '200':
+          description: userId and email from the JWT
+
+  /platform/activity-log:
+    get:
+      tags: [Platform]
+      summary: Filtered activity log
+      description: Every recordActivity() call across the app writes into this table; this is its read side.
+      security: [{ superAdminBearer: [] }]
+      parameters:
+        - { name: action, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: page, in: query, schema: { type: integer, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Paginated activity rows
+
+  /platform/activity-log/export:
+    get:
+      tags: [Platform]
+      summary: 'Export the activity log as a spreadsheet — the export itself is recorded'
+      description: Same filters as GET /platform/activity-log. Returns a CSV download.
+      security: [{ superAdminBearer: [] }]
+      parameters:
+        - { name: action, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }

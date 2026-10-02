@@ -19,6 +19,9 @@ public interface InvitationService {
 
     InvitationResponse resend(AuthenticatedUser inviter, UUID invitationId);
 
+    /** "Resend, or cancel the invitation" while a brokerage owner hasn't accepted yet. */
+    void cancel(AuthenticatedUser inviter, UUID invitationId);
+
     InvitationPreviewResponse preview(String rawToken);
 
     AcceptInvitationResponse accept(AcceptInvitationRequest request);
