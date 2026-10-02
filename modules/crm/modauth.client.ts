@@ -74,3 +74,26 @@ export async function resolveTeam(
   ];
   return { members, brokerIds: members.map((m) => m.userId) };
 }
+
+export interface TenantPerson {
+  userId: string;
+  name: string | null;
+  role: ModAuthRole;
+  teamId: string | null;
+}
+
+/**
+ * Forwards the caller's own JWT to modules/auth's JWT-authenticated
+ * GET /api/v1/modauth/people (Tenant Admin only there) — the tenant-wide
+ * counterpart of resolveTeam, for Reports and the "every lead/client
+ * across the brokerage" view.
+ */
+export async function getTenantPeople(callerBearerToken: string): Promise<TenantPerson[]> {
+  const res = await fetch(`${baseUrl}/api/v1/modauth/people`, {
+    headers: { Authorization: `Bearer ${callerBearerToken}` },
+  });
+  if (!res.ok) {
+    throw new ApiError(`Auth service people lookup failed: ${res.status}`, 502);
+  }
+  return (await res.json()) as TenantPerson[];
+}

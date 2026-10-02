@@ -78,3 +78,17 @@ export const taskIdParamSchema = z.object({
   query: z.object({}).optional(),
   params: z.object({ id: z.string().uuid() }),
 });
+
+const REPORT_TYPES = ['pipeline', 'renewals', 'team-performance', 'ai-usage'] as const;
+
+export const reportQuerySchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({
+    type: z.enum(REPORT_TYPES),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    brokerId: z.string().uuid().optional(),
+    teamId: z.string().uuid().optional(),
+  }),
+  params: z.object({}).optional(),
+});
