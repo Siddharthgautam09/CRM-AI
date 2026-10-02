@@ -11,6 +11,9 @@ components:
   schemas:
     Lead:
       type: object
+      description: >
+        Also "the client" once stage is FUNDED — there's no separate model,
+        see /crm/clients.
       properties:
         id: { type: string, format: uuid }
         tenantId: { type: string, format: uuid }
@@ -22,15 +25,51 @@ components:
           type: string
           enum: [NEW, QUALIFIED, APPLICATION, UNDERWRITING, APPROVED, FUNDED, LOST]
         lostReason: { type: string, nullable: true }
+        income: { type: number, nullable: true }
+        monthlyDebts: { type: number, nullable: true }
+        downPayment: { type: number, nullable: true }
+        propertyAddress: { type: string, nullable: true }
+        propertyValue: { type: number, nullable: true }
+        notes: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     CreateLeadRequest:
       type: object
       required: [name]
+      description: >
+        Flow 4.1's "New client" form — single-applicant scope (no
+        co-applicant modeling). Voice notes / AI review aren't implemented;
+        notes are taken as plain text.
       properties:
         name: { type: string, example: Jamie Rivera }
         email: { type: string, format: email }
         phone: { type: string }
+        income: { type: number, example: 95000 }
+        monthlyDebts: { type: number, example: 800 }
+        downPayment: { type: number, example: 50000 }
+        propertyAddress: { type: string }
+        propertyValue: { type: number, example: 450000 }
+        notes: { type: string }
+    Mortgage:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        leadId: { type: string, format: uuid }
+        lender: { type: string, example: Acme Bank }
+        interestRate: { type: number, example: 4.5 }
+        balance: { type: number, example: 300000 }
+        monthlyPayment: { type: number, example: 1500 }
+        maturityDate: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    MortgageRequest:
+      type: object
+      required: [lender, interestRate, balance, monthlyPayment, maturityDate]
+      properties:
+        lender: { type: string }
+        interestRate: { type: number }
+        balance: { type: number }
+        monthlyPayment: { type: number }
+        maturityDate: { type: string, format: date-time }
     Task:
       type: object
       properties:
@@ -61,7 +100,7 @@ components:
         overdueTasks: { type: integer }
         renewalsWithin90Days:
           type: integer
-          description: Always 0 — no Mortgage/renewal model exists yet.
+          description: Mortgages on this broker's clients maturing within 90 days.
         missingDocuments:
           type: integer
           description: Always 0 — no per-lead Document model exists yet.
@@ -81,11 +120,7 @@ paths:
   /crm/leads:
     post:
       tags: [CRM]
-      summary: 'New client — "their own book"'
-      description: >
-        Minimal stand-in for Flow 4.1's full form (name/email/phone only) —
-        this module exists to make Flow 3's team-scoped views real, not to
-        implement the full Broker flow.
+      summary: New client
       security: [{ crmBearer: [] }]
       requestBody:
         required: true
@@ -104,11 +139,29 @@ paths:
                   data: { $ref: '#/components/schemas/Lead' }
     get:
       tags: [CRM]
-      summary: My own leads/clients
+      summary: 'My leads — not yet funded and not lost'
       security: [{ crmBearer: [] }]
       responses:
         '200':
-          description: The caller's own book
+          description: The caller's active pipeline
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Lead' }
+
+  /crm/clients:
+    get:
+      tags: [CRM]
+      summary: 'My clients — funded leads, with their mortgage(s)'
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The caller's funded clients
           content:
             application/json:
               schema:
@@ -138,7 +191,10 @@ paths:
     patch:
       tags: [CRM]
       summary: Move a lead through the pipeline
-      description: A reason is required when moving to LOST.
+      description: >
+        A reason is required when moving to LOST. FUNDED is rejected here
+        (400) — use POST /crm/leads/{id}/fund instead, since funding cannot
+        be skipped without mortgage details.
       security: [{ crmBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -153,14 +209,69 @@ paths:
                 stage:
                   {
                     type: string,
-                    enum: [NEW, QUALIFIED, APPLICATION, UNDERWRITING, APPROVED, FUNDED, LOST],
+                    enum: [NEW, QUALIFIED, APPLICATION, UNDERWRITING, APPROVED, LOST],
                   }
                 lostReason: { type: string }
       responses:
         '200':
           description: Updated
         '400':
-          description: Missing lostReason when moving to LOST
+          description: Missing lostReason when moving to LOST, or stage was FUNDED
+
+  /crm/leads/{id}/fund:
+    post:
+      tags: [CRM]
+      summary: 'Change the stage to Funded — cannot be skipped'
+      description: >
+        Creates the mortgage and moves the stage to FUNDED in one
+        transaction — if either fails, the stage change is cancelled and
+        the lead stays where it was. The lead then appears under
+        /crm/clients instead of /crm/leads.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MortgageRequest' }
+      responses:
+        '200':
+          description: Funded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Lead' }
+        '400':
+          description: Missing mortgage details
+
+  /crm/leads/{id}/mortgages:
+    post:
+      tags: [CRM]
+      summary: 'Add another mortgage — a client can hold more than one'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MortgageRequest' }
+      responses:
+        '201':
+          description: Mortgage added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Mortgage' }
+        '400':
+          description: The lead isn't funded yet
 
   /crm/tasks:
     post:

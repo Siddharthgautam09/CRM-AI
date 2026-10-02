@@ -35,6 +35,12 @@ export const listMyLeadsHandler = asyncHandler(async (req: Request, res: Respons
   res.status(StatusCodes.OK).json({ success: true, data: leads });
 });
 
+export const listMyClientsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const clients = await leadService.listMyClients(user.tenantId, user.userId);
+  res.status(StatusCodes.OK).json({ success: true, data: clients });
+});
+
 export const getMyLeadHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
   const lead = await leadService.getLeadWithAccess(user.tenantId, req.params.id as string, [
@@ -53,6 +59,28 @@ export const updateMyLeadStageHandler = asyncHandler(async (req: Request, res: R
     req.body.lostReason,
   );
   res.status(StatusCodes.OK).json({ success: true, data: lead });
+});
+
+export const fundLeadHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const lead = await leadService.fundLead(
+    user.tenantId,
+    req.params.id as string,
+    [user.userId],
+    req.body,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: lead });
+});
+
+export const addMortgageHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const mortgage = await leadService.addMortgage(
+    user.tenantId,
+    req.params.id as string,
+    [user.userId],
+    req.body,
+  );
+  res.status(StatusCodes.CREATED).json({ success: true, data: mortgage });
 });
 
 export const createTaskHandler = asyncHandler(async (req: Request, res: Response) => {

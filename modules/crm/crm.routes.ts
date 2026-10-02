@@ -2,10 +2,13 @@ import { Router } from 'express';
 
 import { requireModAuthRole } from './crm-auth.middleware';
 import {
+  addMortgageHandler,
   completeTaskHandler,
   createLeadHandler,
   createTaskHandler,
+  fundLeadHandler,
   getMyLeadHandler,
+  listMyClientsHandler,
   listMyLeadsHandler,
   listMyTasksHandler,
   reassignLeadHandler,
@@ -16,8 +19,10 @@ import {
   updateMyLeadStageHandler,
 } from './crm.controller';
 import {
+  addMortgageSchema,
   createLeadSchema,
   createTaskSchema,
+  fundLeadSchema,
   leadIdParamSchema,
   reassignSchema,
   taskIdParamSchema,
@@ -37,6 +42,7 @@ crmRouter.post(
   createLeadHandler,
 );
 crmRouter.get('/leads', requireModAuthRole('BROKER', 'TEAM_LEAD'), listMyLeadsHandler);
+crmRouter.get('/clients', requireModAuthRole('BROKER', 'TEAM_LEAD'), listMyClientsHandler);
 crmRouter.get(
   '/leads/:id',
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
@@ -48,6 +54,18 @@ crmRouter.patch(
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
   validate(updateStageSchema),
   updateMyLeadStageHandler,
+);
+crmRouter.post(
+  '/leads/:id/fund',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(fundLeadSchema),
+  fundLeadHandler,
+);
+crmRouter.post(
+  '/leads/:id/mortgages',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addMortgageSchema),
+  addMortgageHandler,
 );
 crmRouter.post(
   '/tasks',

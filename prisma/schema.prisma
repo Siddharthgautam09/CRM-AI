@@ -74,11 +74,11 @@ model AiCostLimitOverride {
   updatedAt DateTime @updatedAt
 }
 
-// ── modules/crm (Team Lead / Broker flow — Flow 3 & the minimal Flow 4 it needs) ──
+// ── modules/crm (Team Lead / Broker flow — Flow 3, and now Flow 4's core) ──
 
-// Only what Flow 3 actually needs to be real: a pipeline stage and a broker
-// assignment. No mortgage/document/calendar/AI depth here — see modules/crm's
-// README-level comments for what's deliberately a stand-in vs genuinely unbuilt.
+// "Lead" vs "Client" is just this same stage field — NEW..APPROVED are
+// leads, FUNDED is a client, LOST is neither — not a separate table, so a
+// funding doesn't require moving a row between models.
 enum LeadStage {
   NEW
   QUALIFIED
@@ -98,9 +98,18 @@ model Lead {
   phone        String?
   stage        LeadStage @default(NEW)
   lostReason   String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  tasks        Task[]
+  // "New client" form fields (Flow 4.1) — single-applicant scope, no
+  // co-applicant modeling (that's a bigger schema than this CRM core needs).
+  income          Float?
+  monthlyDebts    Float?
+  downPayment     Float?
+  propertyAddress String?
+  propertyValue   Float?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  tasks           Task[]
+  mortgages       Mortgage[]
 
   // No teamId column: "which team is this lead's broker on" is resolved live
   // against modules/auth (the source of truth for team membership) rather
@@ -109,6 +118,24 @@ model Lead {
   @@index([tenantId])
   @@index([brokerUserId])
   @@index([stage])
+}
+
+// "Change the stage to Funded" cannot be skipped without one of these (see
+// lead.service.ts's fundLead) — a client can hold more than one, each with
+// its own lender and dates, hence a separate table rather than fields on Lead.
+model Mortgage {
+  id             String   @id @default(uuid())
+  leadId         String
+  lender         String
+  interestRate   Float
+  balance        Float
+  monthlyPayment Float
+  maturityDate   DateTime
+  createdAt      DateTime @default(now())
+  lead           Lead     @relation(fields: [leadId], references: [id])
+
+  @@index([leadId])
+  @@index([maturityDate])
 }
 
 model Task {
