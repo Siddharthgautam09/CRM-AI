@@ -1,5 +1,19 @@
 import { Router } from 'express';
 
+import {
+  contactCategoryCountsHandler,
+  createContactHandler,
+  deleteContactHandler,
+  listMyContactsHandler,
+  teamContactsHandler,
+  updateContactHandler,
+} from './contacts.controller';
+import {
+  contactIdParamSchema,
+  createContactSchema,
+  listContactsSchema,
+  updateContactSchema,
+} from './contacts.validation';
 import { requireModAuthRole } from './crm-auth.middleware';
 import {
   addMortgageHandler,
@@ -24,6 +38,7 @@ import {
   teamCalendarHandler,
   teamDashboardHandler,
   teamTasksHandler,
+  updateLeadProfileHandler,
   updateMyLeadStageHandler,
   updateNotesHandler,
   updateTagsHandler,
@@ -42,6 +57,7 @@ import {
   revealFieldSchema,
   taskIdParamSchema,
   updateBookingSettingsSchema,
+  updateLeadProfileSchema,
   updateNotesSchema,
   updateProfileSchema,
   updateStageSchema,
@@ -278,6 +294,12 @@ crmRouter.patch(
   validate(updateTagsSchema),
   updateTagsHandler,
 );
+crmRouter.patch(
+  '/leads/:id/profile',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateLeadProfileSchema),
+  updateLeadProfileHandler,
+);
 crmRouter.post(
   '/leads/:id/reveal',
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
@@ -327,6 +349,7 @@ crmRouter.patch(
 );
 crmRouter.get('/team/tasks', requireModAuthRole('TEAM_LEAD'), teamTasksHandler);
 crmRouter.get('/team/calendar', requireModAuthRole('TEAM_LEAD'), teamCalendarHandler);
+crmRouter.get('/team/contacts', requireModAuthRole('TEAM_LEAD'), teamContactsHandler);
 
 // Reports — shared by Tenant Admin (tenant-wide, or narrowed by team/broker)
 // and Team Lead (always team-scoped). See reports.controller.ts.
@@ -416,6 +439,37 @@ crmRouter.post(
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
   validate(sendEmailSchema),
   sendEmailHandler,
+);
+
+// Contacts / Centres of Influence (SOW Module 14) — own book.
+crmRouter.post(
+  '/contacts',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(createContactSchema),
+  createContactHandler,
+);
+crmRouter.get(
+  '/contacts',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(listContactsSchema),
+  listMyContactsHandler,
+);
+crmRouter.get(
+  '/contacts/category-counts',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  contactCategoryCountsHandler,
+);
+crmRouter.patch(
+  '/contacts/:id',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateContactSchema),
+  updateContactHandler,
+);
+crmRouter.delete(
+  '/contacts/:id',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(contactIdParamSchema),
+  deleteContactHandler,
 );
 
 // Internal, service-to-service (X-Internal-Secret, no JWT) — modauth calls

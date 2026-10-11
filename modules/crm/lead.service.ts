@@ -314,6 +314,37 @@ export async function updateTags(
   return maskLead(updated);
 }
 
+export interface UpdateProfileInput {
+  name?: string;
+  email?: string;
+  phone?: string;
+  city?: string;
+  fileStatus?: 'ACTIVE' | 'INACTIVE';
+  propertyAddress?: string;
+  propertyValue?: number;
+  income?: number;
+  monthlyDebts?: number;
+  downPayment?: number;
+}
+
+/**
+ * "Inline profile edit with Save and Cancel" (SOW 6.9) — one call for the
+ * header/profile-tab fields that don't already have their own dedicated
+ * endpoint (notes, tags, stage and the sensitive fields are all edited
+ * elsewhere, deliberately not folded in here). "Cancel" is just not
+ * calling this — there's nothing to undo server-side.
+ */
+export async function updateLeadProfile(
+  tenantId: string,
+  leadId: string,
+  allowedBrokerIds: string[],
+  input: UpdateProfileInput,
+) {
+  const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
+  const updated = await getPrismaClient().lead.update({ where: { id: lead.id }, data: input });
+  return maskLead(updated);
+}
+
 /** "Click a hidden value... Reveal — the reveal is recorded" — re-hiding on navigate-away is a frontend concern; this just decrypts and logs. */
 export async function revealSensitiveField(
   tenantId: string,

@@ -105,6 +105,18 @@ export const updateTagsHandler = asyncHandler(async (req: Request, res: Response
   res.status(StatusCodes.OK).json({ success: true, data: lead });
 });
 
+/** "Inline profile edit" (SOW 6.9) — own book. */
+export const updateLeadProfileHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const lead = await leadService.updateLeadProfile(
+    user.tenantId,
+    req.params.id as string,
+    [user.userId],
+    req.body,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: lead });
+});
+
 export const revealFieldHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
   const revealed = await leadService.revealSensitiveField(

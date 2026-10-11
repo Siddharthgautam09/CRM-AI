@@ -18,6 +18,7 @@ import {
   pipelineCounts,
   reassign,
   revealSensitiveField,
+  updateLeadProfile,
   updateNotes,
   updateStage,
   updateTags,
@@ -419,6 +420,46 @@ describe('updateTags', () => {
       data: { tags: ['hot'] },
     });
     expect(result.tags).toEqual(['hot']);
+  });
+});
+
+describe('updateLeadProfile — "Inline profile edit with Save and Cancel"', () => {
+  it('updates the header/profile fields and masks the sensitive ones on return', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      sin: null,
+      bankDetails: null,
+    });
+    mockPrisma.lead.update.mockResolvedValue({
+      id: 'lead-1',
+      city: 'Toronto',
+      sin: null,
+      bankDetails: null,
+    });
+
+    const result = await updateLeadProfile(TENANT, 'lead-1', ['me'], { city: 'Toronto' });
+
+    expect(mockPrisma.lead.update).toHaveBeenCalledWith({
+      where: { id: 'lead-1' },
+      data: { city: 'Toronto' },
+    });
+    expect(result.city).toBe('Toronto');
+    expect(result).not.toHaveProperty('sin');
+  });
+
+  it("403s a teammate's lead, same ownership check as everything else", async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'someone-else',
+    });
+
+    await expect(
+      updateLeadProfile(TENANT, 'lead-1', ['me'], { city: 'Toronto' }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockPrisma.lead.update).not.toHaveBeenCalled();
   });
 });
 

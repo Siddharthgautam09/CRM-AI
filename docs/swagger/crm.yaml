@@ -103,6 +103,28 @@ components:
         properties: { type: array, items: { $ref: '#/components/schemas/PropertyRecord' } }
         fundsSources: { type: array, items: { $ref: '#/components/schemas/FundsSource' } }
         followUps: { type: array, items: { $ref: '#/components/schemas/FollowUp' } }
+    Contact:
+      type: object
+      description: "SOW Module 14 — the broker's own referral network (Centre of Influence)."
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        brokerUserId: { type: string, format: uuid }
+        category:
+          type: string
+          enum:
+            [REALTOR, LAWYER, APPRAISER, INSURANCE, ACCOUNTANT, HOME_INSPECTOR, FINANCIAL_ADVISOR]
+        name: { type: string }
+        company: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        email: { type: string, format: email, nullable: true }
+        dateOfBirth: { type: string, format: date-time, nullable: true }
+        address: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        lastContactedAt: { type: string, format: date-time, nullable: true }
+        notes: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Lead:
       type: object
       description: >
@@ -922,6 +944,44 @@ paths:
         '200':
           description: Updated
 
+  /crm/leads/{id}/profile:
+    patch:
+      tags: [CRM]
+      summary: 'Inline profile edit (SOW 6.9) — "Save"; not calling this is "Cancel"'
+      description: >
+        For the header/profile-tab fields that don't already have their own
+        endpoint — notes, tags, stage and the sensitive fields are edited
+        elsewhere.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                phone: { type: string }
+                city: { type: string }
+                fileStatus: { type: string, enum: [ACTIVE, INACTIVE] }
+                propertyAddress: { type: string }
+                propertyValue: { type: number }
+                income: { type: number }
+                monthlyDebts: { type: number }
+                downPayment: { type: number }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Lead' }
+
   /crm/leads/{id}/reveal:
     post:
       tags: [CRM]
@@ -1413,6 +1473,127 @@ paths:
           description: Sent — logged on the person's timeline (activity log)
         '400':
           description: Connect Gmail to send
+
+  /crm/contacts:
+    post:
+      tags: [CRM]
+      summary: Add a contact (SOW Module 14) — one of 7 fixed categories
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, name]
+              properties:
+                category:
+                  type: string
+                  enum:
+                    [
+                      REALTOR,
+                      LAWYER,
+                      APPRAISER,
+                      INSURANCE,
+                      ACCOUNTANT,
+                      HOME_INSPECTOR,
+                      FINANCIAL_ADVISOR,
+                    ]
+                name: { type: string }
+                company: { type: string }
+                phone: { type: string }
+                email: { type: string, format: email }
+                dateOfBirth: { type: string, format: date-time }
+                address: { type: string }
+                city: { type: string }
+                lastContactedAt: { type: string, format: date-time }
+                notes: { type: string }
+      responses:
+        '201':
+          description: Contact added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Contact' }
+    get:
+      tags: [CRM]
+      summary: 'List my contacts — search by name/company/email/phone (SOW 14.3), optionally filtered by category (14.4)'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum:
+              [REALTOR, LAWYER, APPRAISER, INSURANCE, ACCOUNTANT, HOME_INSPECTOR, FINANCIAL_ADVISOR]
+      responses:
+        '200':
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { type: array, items: { $ref: '#/components/schemas/Contact' } }
+
+  /crm/contacts/category-counts:
+    get:
+      tags: [CRM]
+      summary: Contact count per category (SOW 14.4) — all 7 shown, zero-filled when empty
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    additionalProperties: { type: integer }
+
+  /crm/contacts/{id}:
+    patch:
+      tags: [CRM]
+      summary: Update a contact
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [CRM]
+      summary: 'Permanently delete a contact (SOW 14.7) — recorded on the activity log'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Deleted
+
+  /crm/team/contacts:
+    get:
+      tags: [CRM — Team Lead]
+      summary: Every contact across the team's brokers
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { type: array, items: { $ref: '#/components/schemas/Contact' } }
 
   /crm/internal/brokers/{userId}/lead-count:
     get:

@@ -361,3 +361,41 @@ model Appointment {
   @@index([brokerUserId])
   @@index([startTime])
 }
+
+// ── Contacts / Centres of Influence (SOW Module 14) ─────────────────────────
+
+// SOW 14.2 — exactly these seven, no "Other" category.
+enum ContactCategory {
+  REALTOR
+  LAWYER
+  APPRAISER
+  INSURANCE
+  ACCOUNTANT
+  HOME_INSPECTOR
+  FINANCIAL_ADVISOR
+}
+
+// The broker's own referral network (glossary: "COI... the broker's referral
+// contact network") — scoped like Lead/Task, not tenant-shared. SOW 14.8
+// explicitly leaves client/referral linkage undefined, so no leadId here.
+model Contact {
+  id              String          @id @default(uuid())
+  tenantId        String
+  brokerUserId    String
+  category        ContactCategory
+  name            String
+  company         String?
+  phone           String?
+  email           String?
+  dateOfBirth     DateTime?
+  address         String?
+  city            String?
+  lastContactedAt DateTime?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([tenantId])
+  @@index([brokerUserId])
+  @@index([category])
+}
