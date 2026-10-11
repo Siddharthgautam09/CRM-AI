@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
-import { env } from '../../../config/env';
+import { env } from '../../config/env';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_BYTES = 12;
@@ -8,7 +8,7 @@ const IV_BYTES = 12;
 // 64 hex chars = 32 bytes, as AES-256 requires.
 const KEY = Buffer.from(env.google.tokenEncryptionKey, 'hex');
 
-/** Google access/refresh tokens are never stored in plaintext — this is the only place that encrypts/decrypts them. */
+/** Shared AES-256-GCM helper — Google OAuth tokens and sensitive lead fields (SIN, bank details) are never stored in plaintext. */
 export function encryptToken(plaintext: string): string {
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, KEY, iv);

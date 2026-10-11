@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 
+import * as affordabilityService from './affordability.service';
 import * as calendarService from './google/calendar.service';
 import * as leadService from './lead.service';
 import { resolveTeam } from './modauth.client';
@@ -27,7 +28,7 @@ async function requireOwnTeam(req: Request) {
 export const createLeadHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
   const lead = await leadService.createLead(user.tenantId, user.userId, req.body);
-  res.status(StatusCodes.CREATED).json({ success: true, data: lead });
+  res.status(StatusCodes.CREATED).json({ success: true, data: leadService.maskLead(lead) });
 });
 
 export const listMyLeadsHandler = asyncHandler(async (req: Request, res: Response) => {
@@ -47,7 +48,73 @@ export const getMyLeadHandler = asyncHandler(async (req: Request, res: Response)
   const lead = await leadService.getLeadWithAccess(user.tenantId, req.params.id as string, [
     user.userId,
   ]);
+  res.status(StatusCodes.OK).json({ success: true, data: leadService.maskLead(lead) });
+});
+
+// ── Person panel (Flow 4.3) — own book ───────────────────────────────────────
+
+export const getPersonPanelHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const panel = await leadService.getPersonPanel(user.tenantId, req.params.id as string, [
+    user.userId,
+  ]);
+  res.status(StatusCodes.OK).json({ success: true, data: panel });
+});
+
+export const getAffordabilityHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const result = await affordabilityService.getAffordability(
+    user.tenantId,
+    req.params.id as string,
+    [user.userId],
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: result });
+});
+
+/** "Recalculate everyone" (Flow 4.4) — scoped to the broker's own book; body.leadIds lets the frontend "retry just those" failures. */
+export const recalculateAffordabilityHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const summary = await affordabilityService.recalculateForBook(
+    user.tenantId,
+    [user.userId],
+    req.body.leadIds,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: summary });
+});
+
+export const updateNotesHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const lead = await leadService.updateNotes(
+    user.tenantId,
+    req.params.id as string,
+    [user.userId],
+    req.body.brokerNotes,
+    user.userId,
+  );
   res.status(StatusCodes.OK).json({ success: true, data: lead });
+});
+
+export const updateTagsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const lead = await leadService.updateTags(
+    user.tenantId,
+    req.params.id as string,
+    [user.userId],
+    req.body.tags,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: lead });
+});
+
+export const revealFieldHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const revealed = await leadService.revealSensitiveField(
+    user.tenantId,
+    req.params.id as string,
+    [user.userId],
+    req.body.field,
+    user.userId,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: revealed });
 });
 
 export const updateMyLeadStageHandler = asyncHandler(async (req: Request, res: Response) => {
@@ -131,7 +198,29 @@ export const teamBookDetailHandler = asyncHandler(async (req: Request, res: Resp
     req.params.id as string,
     team.brokerIds,
   );
-  res.status(StatusCodes.OK).json({ success: true, data: lead });
+  res.status(StatusCodes.OK).json({ success: true, data: leadService.maskLead(lead) });
+});
+
+export const teamBookPanelHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const team = await requireOwnTeam(req);
+  const panel = await leadService.getPersonPanel(
+    user.tenantId,
+    req.params.id as string,
+    team.brokerIds,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: panel });
+});
+
+export const teamBookAffordabilityHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const team = await requireOwnTeam(req);
+  const result = await affordabilityService.getAffordability(
+    user.tenantId,
+    req.params.id as string,
+    team.brokerIds,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: result });
 });
 
 export const reassignLeadHandler = asyncHandler(async (req: Request, res: Response) => {

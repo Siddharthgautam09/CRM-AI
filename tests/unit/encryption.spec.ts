@@ -1,6 +1,6 @@
-import { decryptToken, encryptToken } from '../../modules/crm/google/token-encryption';
+import { decryptToken, encryptToken } from '../../modules/crm/encryption';
 
-describe('token-encryption — Google tokens are never stored in plaintext', () => {
+describe('encryption — Google tokens and sensitive lead fields are never stored in plaintext', () => {
   it('round-trips a token through encrypt/decrypt', () => {
     const plaintext = 'ya29.a0AfH6SMB_fake_access_token_value';
     const encrypted = encryptToken(plaintext);

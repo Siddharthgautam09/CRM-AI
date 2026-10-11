@@ -1,6 +1,7 @@
+import { decryptToken, encryptToken } from './encryption';
 import { getPrismaClient } from '../../config/database';
 import { ApiError } from '../../utils/api-error';
-import { recordActivity } from '../platform/activity-log';
+import { listActivity, recordActivity } from '../platform/activity-log';
 
 export type LeadStage =
   | 'NEW'
@@ -21,35 +22,59 @@ export interface CreateLeadInput {
   propertyAddress?: string;
   propertyValue?: number;
   notes?: string;
+  tags?: string[];
+  dateOfBirth?: string;
+  sin?: string;
+  bankDetails?: string;
 }
+
+type SensitiveField = 'sin' | 'bankDetails' | 'dateOfBirth';
 
 /**
  * "New client" (Flow 4.1) — applicants/income/debts/properties/down-payment/
  * notes, single-applicant scope (no co-applicant modeling). Voice notes and
  * AI review are a separate pipeline this repo doesn't have yet — notes are
- * taken as plain text, not transcribed or AI-analyzed.
+ * taken as plain text, not transcribed or AI-analyzed. SIN and bank details
+ * (Flow 4.3's "hidden values") are encrypted at rest and never returned by
+ * the normal read paths — see revealSensitiveField.
  */
 export async function createLead(tenantId: string, brokerUserId: string, input: CreateLeadInput) {
+  const { dateOfBirth, sin, bankDetails, ...rest } = input;
   return getPrismaClient().lead.create({
-    data: { tenantId, brokerUserId, ...input },
+    data: {
+      tenantId,
+      brokerUserId,
+      ...rest,
+      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+      sin: sin ? encryptToken(sin) : undefined,
+      bankDetails: bankDetails ? encryptToken(bankDetails) : undefined,
+    },
   });
+}
+
+/** SIN/bank details never leave the server as ciphertext either — just whether one is on file. See revealSensitiveField for the only path that decrypts them. */
+export function maskLead<T extends { sin: string | null; bankDetails: string | null }>(lead: T) {
+  const { sin, bankDetails, ...rest } = lead;
+  return { ...rest, hasSin: sin !== null, hasBankDetails: bankDetails !== null };
 }
 
 /** "Leads" — everything not yet funded and not lost (the active pipeline). */
 export async function listMyLeads(tenantId: string, brokerUserId: string) {
-  return getPrismaClient().lead.findMany({
+  const leads = await getPrismaClient().lead.findMany({
     where: { tenantId, brokerUserId, stage: { notIn: ['FUNDED', 'LOST'] } },
     orderBy: { createdAt: 'desc' },
   });
+  return leads.map(maskLead);
 }
 
 /** "Clients" — funded leads, each with their mortgage(s). */
 export async function listMyClients(tenantId: string, brokerUserId: string) {
-  return getPrismaClient().lead.findMany({
+  const clients = await getPrismaClient().lead.findMany({
     where: { tenantId, brokerUserId, stage: 'FUNDED' },
     orderBy: { createdAt: 'desc' },
     include: { mortgages: true },
   });
+  return clients.map(maskLead);
 }
 
 /** Throws 404 outside the tenant, 403 outside the given access set — used for both "own book" and "team book" access. */
@@ -84,10 +109,11 @@ export async function updateStage(
   if (stage === 'LOST' && !lostReason) {
     throw new ApiError('A reason is required to mark a lead Lost', 400);
   }
-  return getPrismaClient().lead.update({
+  const updated = await getPrismaClient().lead.update({
     where: { id: lead.id },
     data: { stage, lostReason: stage === 'LOST' ? lostReason : null },
   });
+  return maskLead(updated);
 }
 
 export interface MortgageInput {
@@ -121,7 +147,7 @@ export async function fundLead(
       data: { stage: 'FUNDED', lostReason: null },
     }),
   ]);
-  return updated;
+  return maskLead(updated);
 }
 
 /** A client can hold more than one mortgage, each with its own lender and dates. */
@@ -143,10 +169,11 @@ export async function addMortgage(
 /** "Team book" — every lead/client belonging to any broker on the team. */
 export async function listForBrokers(tenantId: string, brokerIds: string[]) {
   if (brokerIds.length === 0) return [];
-  return getPrismaClient().lead.findMany({
+  const leads = await getPrismaClient().lead.findMany({
     where: { tenantId, brokerUserId: { in: brokerIds } },
     orderBy: { createdAt: 'desc' },
   });
+  return leads.map(maskLead);
 }
 
 /** "Reassign to another broker" — caller must already have verified toBrokerUserId is inside the team. */
@@ -174,7 +201,7 @@ export async function reassign(
     targetId: lead.id,
     metadata: { fromBrokerUserId: lead.brokerUserId, toBrokerUserId },
   });
-  return updated;
+  return maskLead(updated);
 }
 
 /** "Team pipeline" — stage counts across every broker on the team. */
@@ -235,4 +262,90 @@ export async function renewalCountByBroker(
   });
   for (const m of mortgages) counts[m.lead.brokerUserId] = (counts[m.lead.brokerUserId] ?? 0) + 1;
   return counts;
+}
+
+// ── Person panel (Flow 4.3) ──────────────────────────────────────────────────
+
+/** "Your notes - editable" — "Original notes" (the `notes` field) is locked forever and never touched here. Each edit is appended to the activity log as its own history entry. */
+export async function updateNotes(
+  tenantId: string,
+  leadId: string,
+  allowedBrokerIds: string[],
+  brokerNotes: string,
+  actorId: string,
+) {
+  const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
+  const updated = await getPrismaClient().lead.update({
+    where: { id: lead.id },
+    data: { brokerNotes },
+  });
+  await recordActivity('crm.notes.updated', {
+    actorId,
+    targetType: 'lead',
+    targetId: lead.id,
+    metadata: { previous: lead.brokerNotes, next: brokerNotes },
+  });
+  return maskLead(updated);
+}
+
+export async function updateTags(
+  tenantId: string,
+  leadId: string,
+  allowedBrokerIds: string[],
+  tags: string[],
+) {
+  const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
+  const updated = await getPrismaClient().lead.update({ where: { id: lead.id }, data: { tags } });
+  return maskLead(updated);
+}
+
+/** "Click a hidden value... Reveal — the reveal is recorded" — re-hiding on navigate-away is a frontend concern; this just decrypts and logs. */
+export async function revealSensitiveField(
+  tenantId: string,
+  leadId: string,
+  allowedBrokerIds: string[],
+  field: SensitiveField,
+  actorId: string,
+): Promise<{ field: SensitiveField; value: string | null }> {
+  const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
+  await recordActivity('crm.lead.sensitive_field_revealed', {
+    actorId,
+    targetType: 'lead',
+    targetId: lead.id,
+    metadata: { field },
+  });
+
+  if (field === 'dateOfBirth') {
+    return { field, value: lead.dateOfBirth ? lead.dateOfBirth.toISOString() : null };
+  }
+  const encrypted = lead[field];
+  return { field, value: encrypted ? decryptToken(encrypted) : null };
+}
+
+/**
+ * "The person panel... same panel everywhere" — one aggregated read for the
+ * Profile/Affordability/Mortgages/Notes/Activity tabs. Documents isn't
+ * included yet (no document storage exists in this repo — see Flow 4.5).
+ */
+export async function getPersonPanel(tenantId: string, leadId: string, allowedBrokerIds: string[]) {
+  const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
+  const [mortgages, history, recentActivity] = await Promise.all([
+    getPrismaClient().mortgage.findMany({
+      where: { leadId: lead.id },
+      orderBy: { createdAt: 'desc' },
+    }),
+    listActivity({ targetId: lead.id, action: 'crm.notes.updated', size: 100 }),
+    listActivity({ targetId: lead.id, size: 50 }),
+  ]);
+
+  return {
+    profile: maskLead(lead),
+    mortgages,
+    notes: {
+      original: lead.notes,
+      yours: lead.brokerNotes,
+      history: history.items,
+    },
+    activity: recentActivity.items,
+  };
 }

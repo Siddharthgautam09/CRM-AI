@@ -7,17 +7,25 @@ import {
   createLeadHandler,
   createTaskHandler,
   fundLeadHandler,
+  getAffordabilityHandler,
   getMyLeadHandler,
+  getPersonPanelHandler,
   listMyClientsHandler,
   listMyLeadsHandler,
   listMyTasksHandler,
   reassignLeadHandler,
+  recalculateAffordabilityHandler,
+  revealFieldHandler,
+  teamBookAffordabilityHandler,
   teamBookDetailHandler,
   teamBookHandler,
+  teamBookPanelHandler,
   teamCalendarHandler,
   teamDashboardHandler,
   teamTasksHandler,
   updateMyLeadStageHandler,
+  updateNotesHandler,
+  updateTagsHandler,
 } from './crm.controller';
 import {
   addMortgageSchema,
@@ -27,11 +35,15 @@ import {
   fundLeadSchema,
   leadIdParamSchema,
   reassignSchema,
+  recalculateAffordabilitySchema,
   reportQuerySchema,
+  revealFieldSchema,
   taskIdParamSchema,
   updateBookingSettingsSchema,
+  updateNotesSchema,
   updateProfileSchema,
   updateStageSchema,
+  updateTagsSchema,
 } from './crm.validation';
 import {
   createAppointmentHandler,
@@ -97,6 +109,44 @@ crmRouter.post(
   validate(addMortgageSchema),
   addMortgageHandler,
 );
+
+// Person panel (Flow 4.3) and its tabs — own book.
+crmRouter.get(
+  '/leads/:id/panel',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(leadIdParamSchema),
+  getPersonPanelHandler,
+);
+crmRouter.get(
+  '/leads/:id/affordability',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(leadIdParamSchema),
+  getAffordabilityHandler,
+);
+crmRouter.post(
+  '/leads/affordability/recalculate',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(recalculateAffordabilitySchema),
+  recalculateAffordabilityHandler,
+);
+crmRouter.patch(
+  '/leads/:id/notes',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateNotesSchema),
+  updateNotesHandler,
+);
+crmRouter.patch(
+  '/leads/:id/tags',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateTagsSchema),
+  updateTagsHandler,
+);
+crmRouter.post(
+  '/leads/:id/reveal',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(revealFieldSchema),
+  revealFieldHandler,
+);
 crmRouter.post(
   '/tasks',
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
@@ -119,6 +169,18 @@ crmRouter.get(
   requireModAuthRole('TEAM_LEAD'),
   validate(leadIdParamSchema),
   teamBookDetailHandler,
+);
+crmRouter.get(
+  '/team/book/:id/panel',
+  requireModAuthRole('TEAM_LEAD'),
+  validate(leadIdParamSchema),
+  teamBookPanelHandler,
+);
+crmRouter.get(
+  '/team/book/:id/affordability',
+  requireModAuthRole('TEAM_LEAD'),
+  validate(leadIdParamSchema),
+  teamBookAffordabilityHandler,
 );
 crmRouter.patch(
   '/team/leads/:id/reassign',

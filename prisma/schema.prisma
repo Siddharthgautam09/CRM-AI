@@ -90,27 +90,41 @@ enum LeadStage {
 }
 
 model Lead {
-  id           String    @id @default(uuid())
-  tenantId     String
-  brokerUserId String
-  name         String
-  email        String?
-  phone        String?
-  stage        LeadStage @default(NEW)
-  lostReason   String?
+  id                    String        @id @default(uuid())
+  tenantId              String
+  brokerUserId          String
+  name                  String
+  email                 String?
+  phone                 String?
+  stage                 LeadStage     @default(NEW)
+  lostReason            String?
   // "New client" form fields (Flow 4.1) — single-applicant scope, no
   // co-applicant modeling (that's a bigger schema than this CRM core needs).
-  income          Float?
-  monthlyDebts    Float?
-  downPayment     Float?
-  propertyAddress String?
-  propertyValue   Float?
-  notes           String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  tasks           Task[]
-  mortgages       Mortgage[]
-  appointments    Appointment[]
+  income                Float?
+  monthlyDebts          Float?
+  downPayment           Float?
+  propertyAddress       String?
+  propertyValue         Float?
+  // "Original notes - read only" (Flow 4.3/4.2) — the source record, locked
+  // once set. brokerNotes is "Your notes - editable"; edits to it are
+  // recorded on the activity log as their own append-only history.
+  notes                 String?
+  brokerNotes           String?
+  tags                  String[]      @default([])
+  dateOfBirth           DateTime?
+  // "Hidden values" (Flow 4.3) — SIN and bank details are encrypted at rest
+  // (see modules/crm/encryption.ts) and only ever leave the server through
+  // the reveal endpoint, which records the reveal on the activity log.
+  sin                   String?
+  bankDetails           String?
+  // "Recalculate everyone" (Flow 4.4) cache — the tab itself always
+  // recomputes live; this is what a book-wide recalculation writes to.
+  affordabilitySnapshot Json?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  tasks                 Task[]
+  mortgages             Mortgage[]
+  appointments          Appointment[]
 
   // No teamId column: "which team is this lead's broker on" is resolved live
   // against modules/auth (the source of truth for team membership) rather

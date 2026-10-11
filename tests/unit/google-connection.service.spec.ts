@@ -88,7 +88,7 @@ describe('getAuthenticatedClientOrNull / requireAuthenticatedClient', () => {
   });
 
   it('decrypts stored tokens before handing them to clientFor', async () => {
-    const { encryptToken } = jest.requireActual('../../modules/crm/google/token-encryption');
+    const { encryptToken } = jest.requireActual('../../modules/crm/encryption');
     mockPrisma.googleConnection.findUnique.mockResolvedValue({
       accessToken: encryptToken('real-access-token'),
       refreshToken: encryptToken('real-refresh-token'),

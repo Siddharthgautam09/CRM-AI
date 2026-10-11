@@ -1,7 +1,7 @@
 import { buildAuthUrl, clientFor, exchangeCodeForTokens } from './google-oauth.client';
-import { decryptToken, encryptToken } from './token-encryption';
 import { getPrismaClient } from '../../../config/database';
 import { ApiError } from '../../../utils/api-error';
+import { decryptToken, encryptToken } from '../encryption';
 
 export interface ConnectionStatus {
   connected: boolean;
