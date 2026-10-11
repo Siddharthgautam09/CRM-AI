@@ -5,3 +5,6 @@ node_modules
 # Java (modules/auth) — local build cache/output, never commit these
 **/.gradle/
 **/build/
+
+flow.txt
+.DS_Store

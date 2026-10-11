@@ -30,7 +30,36 @@ components:
         downPayment: { type: number, nullable: true }
         propertyAddress: { type: string, nullable: true }
         propertyValue: { type: number, nullable: true }
-        notes: { type: string, nullable: true }
+        notes:
+          {
+            type: string,
+            nullable: true,
+            description: 'Original notes — locked forever as the source record.',
+          }
+        brokerNotes:
+          {
+            type: string,
+            nullable: true,
+            description: 'Your notes — editable. See /crm/leads/{id}/notes.',
+          }
+        tags: { type: array, items: { type: string } }
+        dateOfBirth:
+          {
+            type: string,
+            format: date-time,
+            nullable: true,
+            description: 'Hidden — see /crm/leads/{id}/reveal.',
+          }
+        hasSin:
+          type: boolean
+          description: 'Whether a SIN is on file. The value itself is never returned here — see /crm/leads/{id}/reveal.'
+        hasBankDetails:
+          type: boolean
+          description: 'Whether bank details are on file. The value itself is never returned here — see /crm/leads/{id}/reveal.'
+        affordabilitySnapshot:
+          type: object
+          nullable: true
+          description: 'Last "Recalculate everyone" result. The Affordability tab itself always computes live — see /crm/leads/{id}/affordability.'
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     CreateLeadRequest:
@@ -50,6 +79,89 @@ components:
         propertyAddress: { type: string }
         propertyValue: { type: number, example: 450000 }
         notes: { type: string }
+        tags: { type: array, items: { type: string } }
+        dateOfBirth: { type: string, format: date-time }
+        sin:
+          {
+            type: string,
+            description: 'Encrypted at rest (AES-256-GCM) — never returned by any read path except the reveal endpoint.',
+          }
+        bankDetails:
+          {
+            type: string,
+            description: 'Encrypted at rest (AES-256-GCM) — never returned by any read path except the reveal endpoint.',
+          }
+    Affordability:
+      type: object
+      description: 'Ratios, stress-tested rate and maximum purchase price (Flow 4.4) — always computed live, never cached for a single read.'
+      properties:
+        sufficientData: { type: boolean }
+        missingFields:
+          {
+            type: array,
+            items: { type: string },
+            description: "e.g. ['income', 'monthlyDebts'] when there isn't enough to calculate.",
+          }
+        tds:
+          {
+            type: number,
+            nullable: true,
+            description: 'Total Debt Service ratio, %. Null if no propertyValue is set yet.',
+          }
+        stressTestRate:
+          { type: number, description: 'max(contract rate + 2%, benchmark qualifying rate).' }
+        maxPurchasePrice: { type: number, nullable: true }
+        passing:
+          {
+            type: boolean,
+            nullable: true,
+            description: 'Null when there is no chosen property to test against.',
+          }
+        overBy:
+          type: object
+          nullable: true
+          description: "Which figure caused a fail, e.g. { field: 'tds', excessPercent: 3.2 }."
+          properties:
+            field: { type: string }
+            excessPercent: { type: number }
+    RecalculateSummary:
+      type: object
+      description: "'Recalculate everyone' (Flow 4.4) — progress and partial failure, e.g. '38 of 41 updated'."
+      properties:
+        total: { type: integer }
+        succeeded: { type: integer }
+        failures:
+          type: array
+          items:
+            type: object
+            properties:
+              leadId: { type: string, format: uuid }
+              name: { type: string }
+              reason: { type: string }
+    PersonPanel:
+      type: object
+      description: 'Flow 4.3 — the same aggregated panel everywhere (dashboard, list, calendar, task, search).'
+      properties:
+        profile: { $ref: '#/components/schemas/Lead' }
+        mortgages: { type: array, items: { $ref: '#/components/schemas/Mortgage' } }
+        notes:
+          type: object
+          properties:
+            original: { type: string, nullable: true, description: 'Read-only, locked forever.' }
+            yours:
+              { type: string, nullable: true, description: 'Editable — see /crm/leads/{id}/notes.' }
+            history:
+              {
+                type: array,
+                items: { type: object },
+                description: 'Append-only — every edit to "yours", oldest first is not guaranteed; see createdAt.',
+              }
+        activity:
+          {
+            type: array,
+            items: { type: object },
+            description: 'Recent activity-log entries for this lead.',
+          }
     Mortgage:
       type: object
       properties:
@@ -273,6 +385,159 @@ paths:
         '400':
           description: The lead isn't funded yet
 
+  /crm/leads/{id}/panel:
+    get:
+      tags: [CRM]
+      summary: 'Person panel — Profile, Mortgages, Notes, Activity aggregated in one read'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The panel
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/PersonPanel' }
+        '403':
+          description: "You don't have access to this record"
+        '404':
+          description: Not found
+
+  /crm/leads/{id}/affordability:
+    get:
+      tags: [CRM]
+      summary: Affordability tab
+      description: >
+        Always computed live from whatever's on the lead right now — see
+        AffordabilityResult.missingFields for "add income and debts to
+        calculate."
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The calculation (or which fields are missing)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Affordability' }
+
+  /crm/leads/affordability/recalculate:
+    post:
+      tags: [CRM]
+      summary: Recalculate everyone — across the caller's own book
+      description: >
+        Pass leadIds to retry just the previous failures instead of the
+        whole book.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                leadIds: { type: array, items: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Progress summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/RecalculateSummary' }
+
+  /crm/leads/{id}/notes:
+    patch:
+      tags: [CRM]
+      summary: 'Update "Your notes" — editable, unlike the original'
+      description: Every edit is appended to the activity log (the Notes tab's "History").
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brokerNotes]
+              properties:
+                brokerNotes: { type: string }
+      responses:
+        '200':
+          description: Updated
+        '403':
+          description: "You don't have access to this record"
+        '404':
+          description: Not found
+
+  /crm/leads/{id}/tags:
+    patch:
+      tags: [CRM]
+      summary: Replace the tag list
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Updated
+
+  /crm/leads/{id}/reveal:
+    post:
+      tags: [CRM]
+      summary: 'Reveal a hidden value — SIN, bank details, or date of birth'
+      description: >
+        The reveal itself is recorded on the activity log. Re-hiding on
+        navigate-away is a frontend concern, not tracked here.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [field]
+              properties:
+                field: { type: string, enum: [sin, bankDetails, dateOfBirth] }
+      responses:
+        '200':
+          description: The decrypted value (or null if nothing is on file)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      field: { type: string }
+                      value: { type: string, nullable: true }
+        '403':
+          description: "You don't have access to this record"
+        '404':
+          description: Not found
+
   /crm/tasks:
     post:
       tags: [CRM]
@@ -366,6 +631,44 @@ paths:
           description: The lead
         '403':
           description: "You don't have access to this record — outside this team"
+
+  /crm/team/book/{id}/panel:
+    get:
+      tags: [CRM — Team Lead]
+      summary: Person panel for any lead in the team
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The panel
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/PersonPanel' }
+        '403':
+          description: "You don't have access to this record — outside this team"
+
+  /crm/team/book/{id}/affordability:
+    get:
+      tags: [CRM — Team Lead]
+      summary: Affordability tab for any lead in the team
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The calculation (or which fields are missing)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Affordability' }
 
   /crm/team/leads/{id}/reassign:
     patch:
@@ -575,3 +878,116 @@ paths:
           description: Export is not ready yet
         '410':
           description: Download window has expired
+
+  /crm/integrations/google/connect:
+    get:
+      tags: [Google integration]
+      summary: 'Connect email/calendar — the Google OAuth consent URL'
+      description: Broker and Team Lead each connect their own Google account.
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The URL to redirect the browser to
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { type: object, properties: { url: { type: string } } }
+
+  /crm/integrations/google/callback:
+    get:
+      tags: [Google integration]
+      summary: OAuth callback
+      description: >
+        Public — Google redirects the browser here directly with no JWT.
+        `state` is the userId that started the connect flow.
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Connected
+        '400':
+          description: Unknown user for this connection attempt
+
+  /crm/integrations/google/status:
+    get:
+      tags: [Google integration]
+      summary: Is Google connected, and as which account?
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: '{ connected, googleEmail }'
+
+  /crm/integrations/google:
+    delete:
+      tags: [Google integration]
+      summary: Disconnect
+      security: [{ crmBearer: [] }]
+      responses:
+        '204':
+          description: Disconnected
+
+  /crm/appointments:
+    post:
+      tags: [Google integration]
+      summary: 'New appointment (Flow 4.8) — pushed to Google Calendar if connected, else CRM-only'
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, startTime, endTime]
+              properties:
+                title: { type: string }
+                startTime: { type: string, format: date-time }
+                endTime: { type: string, format: date-time }
+                leadId: { type: string, format: uuid }
+                attendeeEmails: { type: array, items: { type: string, format: email } }
+      responses:
+        '201':
+          description: Created — check pushedToGoogle to see whether it reached Calendar
+    get:
+      tags: [Google integration]
+      summary: My appointments
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: The caller's appointments
+
+  /crm/team/calendar:
+    get:
+      tags: [CRM — Team Lead]
+      summary: Team calendar — every appointment across the team's brokers
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: Team appointments
+
+  /crm/emails/send:
+    post:
+      tags: [Google integration]
+      summary: 'Sending an email (Flow 4.7)'
+      description: 400 ("Connect Gmail to send") if the broker hasn't connected Google yet.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, subject, body]
+              properties:
+                to: { type: string, format: email }
+                subject: { type: string }
+                body: { type: string }
+                leadId: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Sent — logged on the person's timeline (activity log)
+        '400':
+          description: Connect Gmail to send

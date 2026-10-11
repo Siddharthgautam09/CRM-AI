@@ -11,7 +11,35 @@ export const createLeadSchema = z.object({
     propertyAddress: z.string().max(500).optional(),
     propertyValue: z.coerce.number().nonnegative().optional(),
     notes: z.string().max(5000).optional(),
+    tags: z.array(z.string().min(1).max(50)).max(20).optional(),
+    dateOfBirth: z.string().datetime().optional(),
+    sin: z.string().min(1).max(50).optional(),
+    bankDetails: z.string().min(1).max(1000).optional(),
   }),
+  query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});
+
+export const updateNotesSchema = z.object({
+  body: z.object({ brokerNotes: z.string().max(10000) }),
+  query: z.object({}).optional(),
+  params: z.object({ id: z.string().uuid() }),
+});
+
+export const updateTagsSchema = z.object({
+  body: z.object({ tags: z.array(z.string().min(1).max(50)).max(20) }),
+  query: z.object({}).optional(),
+  params: z.object({ id: z.string().uuid() }),
+});
+
+export const revealFieldSchema = z.object({
+  body: z.object({ field: z.enum(['sin', 'bankDetails', 'dateOfBirth']) }),
+  query: z.object({}).optional(),
+  params: z.object({ id: z.string().uuid() }),
+});
+
+export const recalculateAffordabilitySchema = z.object({
+  body: z.object({ leadIds: z.array(z.string().uuid()).optional() }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),
 });

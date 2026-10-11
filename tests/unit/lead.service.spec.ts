@@ -2,20 +2,26 @@ jest.mock('../../modules/platform/activity-log');
 jest.mock('../../config/database');
 
 import { getPrismaClient } from '../../config/database';
+import { decryptToken, encryptToken } from '../../modules/crm/encryption';
 import {
   addMortgage,
   createLead,
   fundLead,
   getLeadWithAccess,
+  getPersonPanel,
   listForBrokers,
   listMyClients,
   listMyLeads,
+  maskLead,
   openLeadCountByBroker,
   pipelineCounts,
   reassign,
+  revealSensitiveField,
+  updateNotes,
   updateStage,
+  updateTags,
 } from '../../modules/crm/lead.service';
-import { recordActivity } from '../../modules/platform/activity-log';
+import { listActivity, recordActivity } from '../../modules/platform/activity-log';
 
 const mockPrisma = {
   lead: {
@@ -27,6 +33,7 @@ const mockPrisma = {
   },
   mortgage: {
     create: jest.fn(),
+    findMany: jest.fn(),
   },
   $transaction: jest.fn(),
 };
@@ -304,5 +311,177 @@ describe('addMortgage', () => {
     });
 
     expect(result.id).toBe('mortgage-2');
+  });
+});
+
+describe('createLead — sensitive fields', () => {
+  it('encrypts sin and bankDetails before storing, and parses dateOfBirth', async () => {
+    mockPrisma.lead.create.mockResolvedValue({ id: 'lead-1' });
+    await createLead(TENANT, 'me', {
+      name: 'Jamie Rivera',
+      dateOfBirth: '1990-01-01T00:00:00.000Z',
+      sin: '123-456-789',
+      bankDetails: 'acct-999',
+    });
+
+    const data = mockPrisma.lead.create.mock.calls[0][0].data;
+    expect(data.dateOfBirth).toEqual(new Date('1990-01-01T00:00:00.000Z'));
+    expect(data.sin).not.toBe('123-456-789');
+    expect(decryptToken(data.sin)).toBe('123-456-789');
+    expect(decryptToken(data.bankDetails)).toBe('acct-999');
+  });
+});
+
+describe('maskLead — "hidden values"', () => {
+  it('strips ciphertext and exposes only whether a value is on file', () => {
+    const masked = maskLead({
+      id: 'lead-1',
+      sin: encryptToken('123-456-789'),
+      bankDetails: null,
+    });
+    expect(masked).not.toHaveProperty('sin');
+    expect(masked).not.toHaveProperty('bankDetails');
+    expect(masked.hasSin).toBe(true);
+    expect(masked.hasBankDetails).toBe(false);
+  });
+});
+
+describe('updateNotes — "Your notes - editable"', () => {
+  it('updates brokerNotes and records the edit with before/after on the activity log', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      brokerNotes: 'old note',
+      sin: null,
+      bankDetails: null,
+    });
+    mockPrisma.lead.update.mockResolvedValue({
+      id: 'lead-1',
+      brokerNotes: 'new note',
+      sin: null,
+      bankDetails: null,
+    });
+
+    const result = await updateNotes(TENANT, 'lead-1', ['me'], 'new note', 'me');
+
+    expect(mockPrisma.lead.update).toHaveBeenCalledWith({
+      where: { id: 'lead-1' },
+      data: { brokerNotes: 'new note' },
+    });
+    expect(recordActivity).toHaveBeenCalledWith(
+      'crm.notes.updated',
+      expect.objectContaining({
+        actorId: 'me',
+        targetId: 'lead-1',
+        metadata: { previous: 'old note', next: 'new note' },
+      }),
+    );
+    expect(result).not.toHaveProperty('sin');
+  });
+});
+
+describe('updateTags', () => {
+  it('replaces the tag list on the lead', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      sin: null,
+      bankDetails: null,
+    });
+    mockPrisma.lead.update.mockResolvedValue({
+      id: 'lead-1',
+      tags: ['hot'],
+      sin: null,
+      bankDetails: null,
+    });
+
+    const result = await updateTags(TENANT, 'lead-1', ['me'], ['hot']);
+
+    expect(mockPrisma.lead.update).toHaveBeenCalledWith({
+      where: { id: 'lead-1' },
+      data: { tags: ['hot'] },
+    });
+    expect(result.tags).toEqual(['hot']);
+  });
+});
+
+describe('revealSensitiveField — "Reveal... the reveal is recorded"', () => {
+  it('decrypts sin and records the reveal on the activity log', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      sin: encryptToken('123-456-789'),
+      bankDetails: null,
+    });
+
+    const result = await revealSensitiveField(TENANT, 'lead-1', ['me'], 'sin', 'me');
+
+    expect(result).toEqual({ field: 'sin', value: '123-456-789' });
+    expect(recordActivity).toHaveBeenCalledWith(
+      'crm.lead.sensitive_field_revealed',
+      expect.objectContaining({ actorId: 'me', targetId: 'lead-1', metadata: { field: 'sin' } }),
+    );
+  });
+
+  it('returns null, not an error, when no value is on file', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      sin: null,
+      bankDetails: null,
+    });
+
+    const result = await revealSensitiveField(TENANT, 'lead-1', ['me'], 'sin', 'me');
+    expect(result).toEqual({ field: 'sin', value: null });
+  });
+
+  it('403s a reveal attempt outside the allowed broker set, same as any other access', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'someone-else',
+      sin: encryptToken('123-456-789'),
+    });
+
+    await expect(revealSensitiveField(TENANT, 'lead-1', ['me'], 'sin', 'me')).rejects.toMatchObject(
+      {
+        statusCode: 403,
+      },
+    );
+    expect(recordActivity).not.toHaveBeenCalled();
+  });
+});
+
+describe('getPersonPanel — "same panel everywhere"', () => {
+  it('aggregates profile, mortgages, notes (original/yours/history) and recent activity', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      notes: 'source record',
+      brokerNotes: 'broker note',
+      sin: encryptToken('123-456-789'),
+      bankDetails: null,
+    });
+    mockPrisma.mortgage.findMany.mockResolvedValue([{ id: 'mortgage-1' }]);
+    (listActivity as jest.Mock)
+      .mockResolvedValueOnce({ items: [{ action: 'crm.notes.updated' }], total: 1 })
+      .mockResolvedValueOnce({ items: [{ action: 'crm.lead.reassigned' }], total: 1 });
+
+    const panel = await getPersonPanel(TENANT, 'lead-1', ['me']);
+
+    expect(panel.profile).not.toHaveProperty('sin');
+    expect(panel.profile.hasSin).toBe(true);
+    expect(panel.mortgages).toEqual([{ id: 'mortgage-1' }]);
+    expect(panel.notes).toEqual({
+      original: 'source record',
+      yours: 'broker note',
+      history: [{ action: 'crm.notes.updated' }],
+    });
+    expect(panel.activity).toEqual([{ action: 'crm.lead.reassigned' }]);
   });
 });

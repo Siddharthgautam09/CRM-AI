@@ -57,6 +57,8 @@ export async function recordActivity(
 
 export interface ActivityLogFilter {
   action?: string;
+  actions?: string[];
+  targetId?: string;
   from?: Date;
   to?: Date;
   page?: number;
@@ -69,6 +71,8 @@ export async function listActivity(filter: ActivityLogFilter = {}) {
   const size = filter.size ?? 20;
   const where = {
     ...(filter.action ? { action: filter.action } : {}),
+    ...(filter.actions ? { action: { in: filter.actions } } : {}),
+    ...(filter.targetId ? { targetId: filter.targetId } : {}),
     ...(filter.from || filter.to
       ? {
           createdAt: {
