@@ -9,6 +9,100 @@ components:
         POST /api/v1/modauth/login. The caller's Role/team is resolved
         server-side via modules/auth's internal lookup, not a JWT claim.
   schemas:
+    Applicant:
+      type: object
+      description: 'SOW 5.1/5.3 — one to four per lead.'
+      properties:
+        id: { type: string, format: uuid }
+        leadId: { type: string, format: uuid }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email, nullable: true }
+        phone: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        dateOfBirth: { type: string, format: date-time, nullable: true }
+        brokerNotes: { type: string, nullable: true }
+    Employment:
+      type: object
+      description: 'SOW 5.4/5.5/5.6 — one of possibly several jobs for an applicant.'
+      properties:
+        id: { type: string, format: uuid }
+        applicantId: { type: string, format: uuid }
+        type: { type: string, enum: [EMPLOYED, SELF_EMPLOYED, CORPORATION] }
+        employer: { type: string, nullable: true }
+        position: { type: string, nullable: true }
+        startDate: { type: string, format: date-time, nullable: true }
+        baseSalary: { type: number, nullable: true }
+        t4Values:
+          type: object
+          nullable: true
+          description: "{'2024': 95000, '2023': 91000} — a map, not fixed columns."
+          additionalProperties: { type: number }
+    NoaIncome:
+      type: object
+      description: 'SOW 5.7 — Notice of Assessment line 15000, one row per tax year.'
+      properties:
+        id: { type: string, format: uuid }
+        applicantId: { type: string, format: uuid }
+        taxYear: { type: integer }
+        totalIncome: { type: number }
+    Debt:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        leadId: { type: string, format: uuid }
+        description: { type: string, nullable: true }
+        balance: { type: number }
+        monthlyPayment: { type: number }
+    PropertyRecord:
+      type: object
+      description: 'SOW 5.9 — a property already owned, distinct from the Lead.propertyAddress being purchased.'
+      properties:
+        id: { type: string, format: uuid }
+        leadId: { type: string, format: uuid }
+        address: { type: string }
+        propertyTaxes: { type: number, nullable: true }
+        isCondo: { type: boolean }
+        isRental: { type: boolean }
+        mortgageBalance: { type: number, nullable: true }
+        mortgageLender: { type: string, nullable: true }
+        maturityDate: { type: string, format: date-time, nullable: true }
+        ownership: { type: string, nullable: true }
+    FundsSource:
+      type: object
+      description: 'SOW 5.10 — a repeatable down-payment funds-source row.'
+      properties:
+        id: { type: string, format: uuid }
+        leadId: { type: string, format: uuid }
+        accountType: { type: string }
+        amount: { type: number }
+        isGift: { type: boolean }
+        giftSource: { type: string, nullable: true }
+    FollowUp:
+      type: object
+      description: 'SOW 5.11 — a scheduled commitment from the intake, distinct from a generic Task.'
+      properties:
+        id: { type: string, format: uuid }
+        leadId: { type: string, format: uuid }
+        type: { type: string }
+        scheduledAt: { type: string, format: date-time }
+    IntakeBundle:
+      type: object
+      description: 'The full structured intake for one lead — GET /crm/leads/{id}/intake.'
+      properties:
+        applicants:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/Applicant'
+              - type: object
+                properties:
+                  employments: { type: array, items: { $ref: '#/components/schemas/Employment' } }
+                  noaIncomes: { type: array, items: { $ref: '#/components/schemas/NoaIncome' } }
+        debts: { type: array, items: { $ref: '#/components/schemas/Debt' } }
+        properties: { type: array, items: { $ref: '#/components/schemas/PropertyRecord' } }
+        fundsSources: { type: array, items: { $ref: '#/components/schemas/FundsSource' } }
+        followUps: { type: array, items: { $ref: '#/components/schemas/FollowUp' } }
     Lead:
       type: object
       description: >
@@ -384,6 +478,334 @@ paths:
                   data: { $ref: '#/components/schemas/Mortgage' }
         '400':
           description: The lead isn't funded yet
+
+  /crm/leads/{id}/intake:
+    get:
+      tags: [CRM]
+      summary: The full structured intake bundle (SOW Module 5)
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The bundle
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/IntakeBundle' }
+
+  /crm/leads/{id}/applicants:
+    post:
+      tags: [CRM]
+      summary: Add an applicant — at most 4 per lead
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstName, lastName]
+              properties:
+                firstName: { type: string }
+                lastName: { type: string }
+                email: { type: string, format: email }
+                phone: { type: string }
+                address: { type: string }
+                dateOfBirth: { type: string, format: date-time }
+                brokerNotes: { type: string }
+      responses:
+        '201':
+          description: Applicant added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Applicant' }
+        '400':
+          description: A lead can have at most 4 applicants
+
+  /crm/leads/{id}/applicants/{applicantId}:
+    patch:
+      tags: [CRM]
+      summary: Update an applicant
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: applicantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [CRM]
+      summary: Remove an applicant
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: applicantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Removed
+
+  /crm/leads/{id}/applicants/{applicantId}/employment:
+    post:
+      tags: [CRM]
+      summary: Add a job for this applicant — always adds, never replaces (SOW 5.5)
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: applicantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type: { type: string, enum: [EMPLOYED, SELF_EMPLOYED, CORPORATION] }
+                employer: { type: string }
+                position: { type: string }
+                startDate: { type: string, format: date-time }
+                baseSalary: { type: number }
+                t4Values: { type: object, additionalProperties: { type: number } }
+      responses:
+        '201':
+          description: Employment added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Employment' }
+
+  /crm/leads/{id}/applicants/{applicantId}/noa-income:
+    post:
+      tags: [CRM]
+      summary: Add a year of Notice of Assessment income for this applicant
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: applicantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taxYear, totalIncome]
+              properties:
+                taxYear: { type: integer }
+                totalIncome: { type: number }
+      responses:
+        '201':
+          description: NOA income added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/NoaIncome' }
+        '409':
+          description: That tax year is already on file for this applicant
+
+  /crm/leads/{id}/debts:
+    post:
+      tags: [CRM]
+      summary: Add a debt
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [balance, monthlyPayment]
+              properties:
+                description: { type: string }
+                balance: { type: number }
+                monthlyPayment: { type: number }
+      responses:
+        '201':
+          description: Debt added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Debt' }
+
+  /crm/leads/{id}/debts/{debtId}:
+    patch:
+      tags: [CRM]
+      summary: Update a debt
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: debtId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [CRM]
+      summary: Remove a debt
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: debtId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Removed
+
+  /crm/leads/{id}/properties:
+    post:
+      tags: [CRM]
+      summary: Add a property already owned (SOW 5.9)
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address: { type: string }
+                propertyTaxes: { type: number }
+                isCondo: { type: boolean }
+                isRental: { type: boolean }
+                mortgageBalance: { type: number }
+                mortgageLender: { type: string }
+                maturityDate: { type: string, format: date-time }
+                ownership: { type: string }
+      responses:
+        '201':
+          description: Property added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/PropertyRecord' }
+
+  /crm/leads/{id}/properties/{propertyId}:
+    patch:
+      tags: [CRM]
+      summary: Update a property
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: propertyId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [CRM]
+      summary: Remove a property
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: propertyId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Removed
+
+  /crm/leads/{id}/funds-sources:
+    post:
+      tags: [CRM]
+      summary: Add a down-payment funds-source row (SOW 5.10)
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountType, amount]
+              properties:
+                accountType: { type: string }
+                amount: { type: number }
+                isGift: { type: boolean }
+                giftSource: { type: string }
+      responses:
+        '201':
+          description: Funds source added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/FundsSource' }
+
+  /crm/leads/{id}/funds-sources/{fundsSourceId}:
+    delete:
+      tags: [CRM]
+      summary: Remove a funds-source row
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: fundsSourceId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Removed
+
+  /crm/leads/{id}/follow-ups:
+    post:
+      tags: [CRM]
+      summary: Add a follow-up (SOW 5.11) — distinct from a generic Task
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, scheduledAt]
+              properties:
+                type: { type: string }
+                scheduledAt: { type: string, format: date-time }
+      responses:
+        '201':
+          description: Follow-up added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/FollowUp' }
+
+  /crm/leads/{id}/follow-ups/{followUpId}:
+    delete:
+      tags: [CRM]
+      summary: Remove a follow-up
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: followUpId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: Removed
 
   /crm/leads/{id}/panel:
     get:

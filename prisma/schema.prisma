@@ -89,6 +89,13 @@ enum LeadStage {
   LOST
 }
 
+// SOW 4.16/6.3 — orthogonal to the pipeline `stage`: a Lost/Funded deal is
+// still ACTIVE here, this only tracks whether the file itself is retired.
+enum FileStatus {
+  ACTIVE
+  INACTIVE
+}
+
 model Lead {
   id                    String        @id @default(uuid())
   tenantId              String
@@ -96,6 +103,9 @@ model Lead {
   name                  String
   email                 String?
   phone                 String?
+  // SOW 5.12 — "Client name, city, assignment, tags, and file status."
+  city                  String?
+  fileStatus            FileStatus    @default(ACTIVE)
   stage                 LeadStage     @default(NEW)
   lostReason            String?
   // "New client" form fields (Flow 4.1) — single-applicant scope, no
@@ -125,6 +135,14 @@ model Lead {
   tasks                 Task[]
   mortgages             Mortgage[]
   appointments          Appointment[]
+  // SOW Module 5's structured intake — additive alongside the flat fields
+  // above, which stay as a lightweight fallback (see AffordabilityResult's
+  // own comment in affordability.service.ts for how the two combine).
+  applicants            Applicant[]
+  debts                 Debt[]
+  properties            PropertyRecord[]
+  fundsSources          FundsSource[]
+  followUps             FollowUp[]
 
   // No teamId column: "which team is this lead's broker on" is resolved live
   // against modules/auth (the source of truth for team membership) rather
@@ -133,6 +151,126 @@ model Lead {
   @@index([tenantId])
   @@index([brokerUserId])
   @@index([stage])
+}
+
+// ── Structured intake (SOW Module 5) ────────────────────────────────────────
+
+// SOW 5.1/5.3 — one to four per lead, enforced in intake.service.ts (the
+// schema itself doesn't cap it, same as every other "business rule, not a
+// DB constraint" in this codebase).
+model Applicant {
+  id          String       @id @default(uuid())
+  leadId      String
+  lead        Lead         @relation(fields: [leadId], references: [id])
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String?
+  address     String?
+  dateOfBirth DateTime?
+  brokerNotes String?
+  createdAt   DateTime     @default(now())
+  employments Employment[]
+  noaIncomes  NoaIncome[]
+
+  @@index([leadId])
+}
+
+enum EmploymentType {
+  EMPLOYED
+  SELF_EMPLOYED
+  CORPORATION
+}
+
+// SOW 5.4/5.5/5.6 — multiple jobs per applicant, hence a child table of
+// Applicant rather than fields on it.
+model Employment {
+  id          String         @id @default(uuid())
+  applicantId String
+  applicant   Applicant      @relation(fields: [applicantId], references: [id])
+  type        EmploymentType
+  employer    String?
+  position    String?
+  startDate   DateTime?
+  baseSalary  Float?
+  // {"2024": 95000, "2023": 91000} — a map, not fixed columns, since "the
+  // required years" is a moving target this schema shouldn't hardcode.
+  t4Values    Json?
+  createdAt   DateTime       @default(now())
+
+  @@index([applicantId])
+}
+
+// SOW 5.7 — Notice of Assessment line 15000, 2 years per applicant.
+model NoaIncome {
+  id          String    @id @default(uuid())
+  applicantId String
+  applicant   Applicant @relation(fields: [applicantId], references: [id])
+  taxYear     Int
+  totalIncome Float
+  createdAt   DateTime  @default(now())
+
+  @@unique([applicantId, taxYear])
+}
+
+// SOW 5.8 — balance + monthly payment; "configurable payment calculation
+// rules" is a future lender-rules concern, not modeled here yet.
+model Debt {
+  id             String   @id @default(uuid())
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id])
+  description    String?
+  balance        Float
+  monthlyPayment Float
+  createdAt      DateTime @default(now())
+
+  @@index([leadId])
+}
+
+// SOW 5.9 — properties the applicant(s) already own, distinct from
+// Lead.propertyAddress/propertyValue (the property being purchased).
+model PropertyRecord {
+  id              String    @id @default(uuid())
+  leadId          String
+  lead            Lead      @relation(fields: [leadId], references: [id])
+  address         String
+  propertyTaxes   Float?
+  isCondo         Boolean   @default(false)
+  isRental        Boolean   @default(false)
+  mortgageBalance Float?
+  mortgageLender  String?
+  maturityDate    DateTime?
+  ownership       String?
+  createdAt       DateTime  @default(now())
+
+  @@index([leadId])
+}
+
+// SOW 5.10 — repeatable funds-source rows for the down payment.
+model FundsSource {
+  id          String   @id @default(uuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id])
+  accountType String
+  amount      Float
+  isGift      Boolean  @default(false)
+  giftSource  String?
+  createdAt   DateTime @default(now())
+
+  @@index([leadId])
+}
+
+// SOW 5.11 — distinct from Task: a follow-up is a scheduled commitment
+// attached to the intake itself, not a generic to-do.
+model FollowUp {
+  id          String   @id @default(uuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id])
+  type        String
+  scheduledAt DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([leadId])
 }
 
 // "Change the stage to Funded" cannot be skipped without one of these (see

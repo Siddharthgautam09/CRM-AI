@@ -108,13 +108,59 @@ export function computeAffordability(
   };
 }
 
+interface AffordabilityInputs {
+  income: number | null;
+  monthlyDebts: number | null;
+  downPayment: number | null;
+  propertyValue: number | null;
+}
+
+/**
+ * The structured intake (SOW Module 5) wins over the flat Lead fields when
+ * it exists — one applicant with no income source still counts as "has
+ * structured data," so a $0 household income here means exactly that, not
+ * "fall back to the flat field." Income per applicant prefers their most
+ * recent NOA total (verified) over an annualized base salary (self-reported).
+ */
+async function resolveAffordabilityInputs(lead: {
+  id: string;
+  income: number | null;
+  monthlyDebts: number | null;
+  downPayment: number | null;
+  propertyValue: number | null;
+}): Promise<AffordabilityInputs> {
+  const applicants = await getPrismaClient().applicant.findMany({
+    where: { leadId: lead.id },
+    include: { employments: true, noaIncomes: true },
+  });
+
+  if (applicants.length === 0) {
+    return lead;
+  }
+
+  const income = applicants.reduce((sum, applicant) => {
+    const latestNoa = applicant.noaIncomes.sort((a, b) => b.taxYear - a.taxYear)[0];
+    if (latestNoa) return sum + latestNoa.totalIncome;
+    const latestJob = applicant.employments.sort(
+      (a, b) => (b.startDate?.getTime() ?? 0) - (a.startDate?.getTime() ?? 0),
+    )[0];
+    return sum + (latestJob?.baseSalary ?? 0);
+  }, 0);
+
+  const debts = await getPrismaClient().debt.findMany({ where: { leadId: lead.id } });
+  const monthlyDebts = debts.reduce((sum, debt) => sum + debt.monthlyPayment, 0);
+
+  return { income, monthlyDebts, downPayment: lead.downPayment, propertyValue: lead.propertyValue };
+}
+
 export async function getAffordability(
   tenantId: string,
   leadId: string,
   allowedBrokerIds: string[],
 ): Promise<AffordabilityResult> {
   const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
-  return computeAffordability(lead);
+  const inputs = await resolveAffordabilityInputs(lead);
+  return computeAffordability(inputs);
 }
 
 export interface RecalculateSummary {
@@ -141,7 +187,8 @@ export async function recalculateForBook(
   const failures: RecalculateSummary['failures'] = [];
   let succeeded = 0;
   for (const lead of leads) {
-    const result = computeAffordability(lead);
+    const inputs = await resolveAffordabilityInputs(lead);
+    const result = computeAffordability(inputs);
     if (!result.sufficientData) {
       failures.push({
         leadId: lead.id,

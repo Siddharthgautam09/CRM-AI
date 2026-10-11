@@ -61,6 +61,42 @@ import {
   oauthCallbackSchema,
   sendEmailSchema,
 } from './google/google.validation';
+import {
+  addApplicantHandler,
+  addDebtHandler,
+  addEmploymentHandler,
+  addFollowUpHandler,
+  addFundsSourceHandler,
+  addNoaIncomeHandler,
+  addPropertyRecordHandler,
+  getIntakeBundleHandler,
+  removeApplicantHandler,
+  removeDebtHandler,
+  removeFollowUpHandler,
+  removeFundsSourceHandler,
+  removePropertyRecordHandler,
+  updateApplicantHandler,
+  updateDebtHandler,
+  updatePropertyRecordHandler,
+} from './intake.controller';
+import {
+  addApplicantSchema,
+  addDebtSchema,
+  addEmploymentSchema,
+  addFollowUpSchema,
+  addFundsSourceSchema,
+  addNoaIncomeSchema,
+  addPropertyRecordSchema,
+  applicantIdParamSchema,
+  debtIdParamSchema,
+  followUpIdParamSchema,
+  fundsSourceIdParamSchema,
+  intakeBundleParamSchema,
+  propertyIdParamSchema,
+  updateApplicantSchema,
+  updateDebtSchema,
+  updatePropertyRecordSchema,
+} from './intake.validation';
 import { exportReportHandler, getReportHandler } from './reports.controller';
 import {
   downloadSelfServiceExportHandler,
@@ -111,6 +147,104 @@ crmRouter.post(
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
   validate(addMortgageSchema),
   addMortgageHandler,
+);
+
+// Structured intake (SOW Module 5) — own book.
+crmRouter.get(
+  '/leads/:id/intake',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(intakeBundleParamSchema),
+  getIntakeBundleHandler,
+);
+crmRouter.post(
+  '/leads/:id/applicants',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addApplicantSchema),
+  addApplicantHandler,
+);
+crmRouter.patch(
+  '/leads/:id/applicants/:applicantId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateApplicantSchema),
+  updateApplicantHandler,
+);
+crmRouter.delete(
+  '/leads/:id/applicants/:applicantId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(applicantIdParamSchema),
+  removeApplicantHandler,
+);
+crmRouter.post(
+  '/leads/:id/applicants/:applicantId/employment',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addEmploymentSchema),
+  addEmploymentHandler,
+);
+crmRouter.post(
+  '/leads/:id/applicants/:applicantId/noa-income',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addNoaIncomeSchema),
+  addNoaIncomeHandler,
+);
+crmRouter.post(
+  '/leads/:id/debts',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addDebtSchema),
+  addDebtHandler,
+);
+crmRouter.patch(
+  '/leads/:id/debts/:debtId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateDebtSchema),
+  updateDebtHandler,
+);
+crmRouter.delete(
+  '/leads/:id/debts/:debtId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(debtIdParamSchema),
+  removeDebtHandler,
+);
+crmRouter.post(
+  '/leads/:id/properties',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addPropertyRecordSchema),
+  addPropertyRecordHandler,
+);
+crmRouter.patch(
+  '/leads/:id/properties/:propertyId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updatePropertyRecordSchema),
+  updatePropertyRecordHandler,
+);
+crmRouter.delete(
+  '/leads/:id/properties/:propertyId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(propertyIdParamSchema),
+  removePropertyRecordHandler,
+);
+crmRouter.post(
+  '/leads/:id/funds-sources',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addFundsSourceSchema),
+  addFundsSourceHandler,
+);
+crmRouter.delete(
+  '/leads/:id/funds-sources/:fundsSourceId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(fundsSourceIdParamSchema),
+  removeFundsSourceHandler,
+);
+crmRouter.post(
+  '/leads/:id/follow-ups',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addFollowUpSchema),
+  addFollowUpHandler,
+);
+crmRouter.delete(
+  '/leads/:id/follow-ups/:followUpId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(followUpIdParamSchema),
+  removeFollowUpHandler,
 );
 
 // Person panel (Flow 4.3) and its tabs — own book.
