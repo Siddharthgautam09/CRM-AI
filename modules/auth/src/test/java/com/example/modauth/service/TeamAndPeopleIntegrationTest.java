@@ -136,7 +136,11 @@ class TeamAndPeopleIntegrationTest {
         RoleResolver roleResolver = new RoleResolver(roleRepo);
         PersonMapper personMapper = new PersonMapper(userLookupRepo);
         teamService = new TeamServiceImpl(teamRepo, roleRepo, roleResolver, personMapper);
-        peopleService = new PeopleServiceImpl(roleRepo, userLookupRepo, refreshTokenRepo, roleResolver, personMapper);
+        // No Lead model exists on this Postgres — this test is about the
+        // People/Teams round trip, not the cross-service CRM check, which
+        // TeamAndPeopleIntegrationTest's Mockito-based siblings already cover.
+        CrmClient noAssignedClients = (tenantId, userId) -> 0;
+        peopleService = new PeopleServiceImpl(roleRepo, userLookupRepo, refreshTokenRepo, roleResolver, personMapper, noAssignedClients);
         admin = new AuthenticatedUser(UUID.randomUUID(), tenantId, "acme", List.of(), UserType.TENANT_USER,
                 "session", null, "jti");
     }

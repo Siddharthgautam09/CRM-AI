@@ -317,9 +317,12 @@ public class InvitationServiceImpl implements InvitationService {
     static void requireCanInvite(Role inviterRole, Role inviteeRole) {
         boolean allowed = switch (inviterRole) {
             case SUPER_ADMIN -> inviteeRole == Role.TENANT_ADMIN;
-            case TENANT_ADMIN -> inviteeRole == Role.TEAM_LEAD || inviteeRole == Role.BROKER;
+            // SOW 2.10: "Tenant Admin creates fixed teams and assigns brokers,
+            // assistants, and Team Leads."
+            case TENANT_ADMIN -> inviteeRole == Role.TEAM_LEAD || inviteeRole == Role.BROKER
+                    || inviteeRole == Role.ASSISTANT;
             case TEAM_LEAD -> inviteeRole == Role.BROKER;
-            case BROKER -> false;
+            case BROKER, ASSISTANT -> false;
         };
         if (!allowed) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,

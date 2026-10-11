@@ -40,6 +40,7 @@ class PeopleServiceImplTest {
     @Mock private AuthRefreshTokenJpaRepository refreshTokenRepo;
     @Mock private RoleResolver roleResolver;
     @Mock private PersonMapper personMapper;
+    @Mock private CrmClient crmClient;
 
     private PeopleServiceImpl service;
 
@@ -48,7 +49,7 @@ class PeopleServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new PeopleServiceImpl(roleRepo, userLookupRepo, refreshTokenRepo, roleResolver, personMapper);
+        service = new PeopleServiceImpl(roleRepo, userLookupRepo, refreshTokenRepo, roleResolver, personMapper, crmClient);
         admin = new AuthenticatedUser(UUID.randomUUID(), tenantId, "acme", List.of(), UserType.TENANT_USER,
                 "session", null, "jti");
     }
@@ -111,6 +112,20 @@ class PeopleServiceImplTest {
         assertThatThrownBy(() -> service.deactivate(admin, otherAdminId))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Cannot deactivate a Tenant Admin");
+
+        verify(userLookupRepo, never()).save(any());
+        verify(refreshTokenRepo, never()).revokeAllByUserId(any(), any());
+    }
+
+    @Test
+    void deactivateBlockedWhileClientsAreStillAssigned() {
+        UUID brokerId = UUID.randomUUID();
+        when(roleRepo.findById(brokerId)).thenReturn(Optional.of(roleRow(brokerId, tenantId, Role.BROKER)));
+        when(crmClient.activeAssignedLeadCount(tenantId, brokerId)).thenReturn(14);
+
+        assertThatThrownBy(() -> service.deactivate(admin, brokerId))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Reassign their 14 clients first");
 
         verify(userLookupRepo, never()).save(any());
         verify(refreshTokenRepo, never()).revokeAllByUserId(any(), any());

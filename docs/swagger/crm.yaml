@@ -991,3 +991,38 @@ paths:
           description: Sent — logged on the person's timeline (activity log)
         '400':
           description: Connect Gmail to send
+
+  /crm/internal/brokers/{userId}/lead-count:
+    get:
+      tags: [Internal]
+      summary: modules/auth calls this from the "Removing someone" deactivation check (SOW 2.11)
+      description: >
+        Internal — gated by X-Internal-Secret, not a JWT. "Do they still have
+        clients assigned?" — every lead/client on this broker's book, Lost
+        excluded.
+      parameters:
+        - name: X-Internal-Secret
+          in: header
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: tenantId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      count: { type: integer }

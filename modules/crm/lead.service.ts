@@ -244,6 +244,21 @@ export async function openLeadCountByBroker(
   return counts;
 }
 
+/**
+ * "Do they still have clients assigned?" (Flow 2 / SOW 2.11) — every lead/
+ * client still on this broker's book, Lost excluded since a dead deal needs
+ * no reassignment. Called by modauth's internal deactivation check (see
+ * docs/swagger/crm.yaml's internal path), not by any JWT-authenticated route.
+ */
+export async function activeAssignedLeadCount(
+  tenantId: string,
+  brokerUserId: string,
+): Promise<number> {
+  return getPrismaClient().lead.count({
+    where: { tenantId, brokerUserId, stage: { not: 'LOST' } },
+  });
+}
+
 /** Renewals due within 90 days, per broker — the workload view's real figure (see Mortgage.maturityDate). */
 export async function renewalCountByBroker(
   tenantId: string,

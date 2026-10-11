@@ -126,6 +126,20 @@ class TeamServiceImplTest {
     }
 
     @Test
+    void addMemberAcceptsAnAssistantToo() {
+        UUID assistantId = UUID.randomUUID();
+        TeamEntity team = TeamEntity.builder().id(UUID.randomUUID()).tenantId(tenantId).name("X").teamLeadUserId(leadId).build();
+        ModAuthUserRoleEntity assistant = roleRow(assistantId, tenantId, Role.ASSISTANT);
+        when(teamRepo.findById(team.getId())).thenReturn(Optional.of(team));
+        when(roleRepo.findById(assistantId)).thenReturn(Optional.of(assistant));
+
+        service.addMember(admin, team.getId(), assistantId);
+
+        assertThat(assistant.getTeamId()).isEqualTo(team.getId());
+        verify(roleRepo).save(assistant);
+    }
+
+    @Test
     void removeMemberClearsTeamIdButKeepsRoleAndAccount() {
         TeamEntity team = TeamEntity.builder().id(UUID.randomUUID()).tenantId(tenantId).name("X").teamLeadUserId(leadId).build();
         ModAuthUserRoleEntity broker = roleRow(brokerId, tenantId, Role.BROKER);

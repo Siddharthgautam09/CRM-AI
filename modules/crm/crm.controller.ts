@@ -250,3 +250,14 @@ export const teamCalendarHandler = asyncHandler(async (req: Request, res: Respon
   const appointments = await calendarService.listForBrokers(user.tenantId, team.brokerIds);
   res.status(StatusCodes.OK).json({ success: true, data: appointments });
 });
+
+// ── Internal (service-to-service, X-Internal-Secret, no JWT) ────────────────
+
+/** modauth's deactivation check (SOW 2.11) — "do they still have clients assigned?" */
+export const internalLeadCountHandler = asyncHandler(async (req: Request, res: Response) => {
+  const count = await leadService.activeAssignedLeadCount(
+    req.query.tenantId as string,
+    req.params.userId as string,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: { count } });
+});

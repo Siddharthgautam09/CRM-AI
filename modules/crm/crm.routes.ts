@@ -10,6 +10,7 @@ import {
   getAffordabilityHandler,
   getMyLeadHandler,
   getPersonPanelHandler,
+  internalLeadCountHandler,
   listMyClientsHandler,
   listMyLeadsHandler,
   listMyTasksHandler,
@@ -33,6 +34,7 @@ import {
   createTaskSchema,
   exportJobIdParamSchema,
   fundLeadSchema,
+  internalLeadCountSchema,
   leadIdParamSchema,
   reassignSchema,
   recalculateAffordabilitySchema,
@@ -71,6 +73,7 @@ import {
   updateProfileHandler,
 } from './tenant.controller';
 import { validate } from '../../middlewares/validate.middleware';
+import { requireInternalSecret } from '../platform/internal-secret.middleware';
 
 // Full OpenAPI docs live in docs/swagger/crm.yaml — see config/swagger.ts's apis list.
 const crmRouter = Router();
@@ -279,6 +282,15 @@ crmRouter.post(
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
   validate(sendEmailSchema),
   sendEmailHandler,
+);
+
+// Internal, service-to-service (X-Internal-Secret, no JWT) — modauth calls
+// this from PeopleServiceImpl.deactivate() (SOW 2.11).
+crmRouter.get(
+  '/internal/brokers/:userId/lead-count',
+  requireInternalSecret,
+  validate(internalLeadCountSchema),
+  internalLeadCountHandler,
 );
 
 export { crmRouter };

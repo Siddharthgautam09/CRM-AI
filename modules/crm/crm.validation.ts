@@ -154,3 +154,9 @@ export const exportJobIdParamSchema = z.object({
   query: z.object({}).optional(),
   params: z.object({ jobId: z.string().uuid() }),
 });
+
+export const internalLeadCountSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({ tenantId: z.string().uuid() }),
+  params: z.object({ userId: z.string().uuid() }),
+});

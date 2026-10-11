@@ -4,6 +4,7 @@ jest.mock('../../config/database');
 import { getPrismaClient } from '../../config/database';
 import { decryptToken, encryptToken } from '../../modules/crm/encryption';
 import {
+  activeAssignedLeadCount,
   addMortgage,
   createLead,
   fundLead,
@@ -30,6 +31,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     update: jest.fn(),
     groupBy: jest.fn(),
+    count: jest.fn(),
   },
   mortgage: {
     create: jest.fn(),
@@ -197,6 +199,19 @@ describe('listForBrokers — "Team book"', () => {
     const leads = await listForBrokers(TENANT, []);
     expect(leads).toEqual([]);
     expect(mockPrisma.lead.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('activeAssignedLeadCount — "Do they still have clients assigned?" (SOW 2.11)', () => {
+  it('counts everything except Lost', async () => {
+    mockPrisma.lead.count.mockResolvedValue(14);
+
+    const count = await activeAssignedLeadCount(TENANT, 'broker-1');
+
+    expect(count).toBe(14);
+    expect(mockPrisma.lead.count).toHaveBeenCalledWith({
+      where: { tenantId: TENANT, brokerUserId: 'broker-1', stage: { not: 'LOST' } },
+    });
   });
 });
 

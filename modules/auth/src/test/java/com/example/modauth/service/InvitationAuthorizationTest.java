@@ -24,9 +24,10 @@ class InvitationAuthorizationTest {
     }
 
     @Test
-    void tenantAdminCanInviteTeamLeadOrBroker() {
+    void tenantAdminCanInviteTeamLeadOrBrokerOrAssistant() {
         InvitationServiceImpl.requireCanInvite(Role.TENANT_ADMIN, Role.TEAM_LEAD);
         InvitationServiceImpl.requireCanInvite(Role.TENANT_ADMIN, Role.BROKER);
+        InvitationServiceImpl.requireCanInvite(Role.TENANT_ADMIN, Role.ASSISTANT);
         assertThatThrownBy(() -> InvitationServiceImpl.requireCanInvite(Role.TENANT_ADMIN, Role.TENANT_ADMIN))
                 .isInstanceOf(ResponseStatusException.class);
     }
@@ -35,6 +36,8 @@ class InvitationAuthorizationTest {
     void teamLeadCanOnlyInviteBroker() {
         InvitationServiceImpl.requireCanInvite(Role.TEAM_LEAD, Role.BROKER);
         assertThatThrownBy(() -> InvitationServiceImpl.requireCanInvite(Role.TEAM_LEAD, Role.TEAM_LEAD))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> InvitationServiceImpl.requireCanInvite(Role.TEAM_LEAD, Role.ASSISTANT))
                 .isInstanceOf(ResponseStatusException.class);
     }
 
@@ -45,10 +48,17 @@ class InvitationAuthorizationTest {
     }
 
     @Test
+    void assistantCanInviteNoOne() {
+        assertThatThrownBy(() -> InvitationServiceImpl.requireCanInvite(Role.ASSISTANT, Role.BROKER))
+                .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
     void dashboardKeyMatchesEachRole() {
         assertThat(Role.SUPER_ADMIN.dashboardKey()).isEqualTo("platform_console");
         assertThat(Role.TENANT_ADMIN.dashboardKey()).isEqualTo("brokerage_dashboard");
         assertThat(Role.TEAM_LEAD.dashboardKey()).isEqualTo("team_dashboard");
         assertThat(Role.BROKER.dashboardKey()).isEqualTo("broker_dashboard");
+        assertThat(Role.ASSISTANT.dashboardKey()).isEqualTo("broker_dashboard");
     }
 }
