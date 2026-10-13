@@ -59,6 +59,7 @@ const BROKER_ID = '33333333-3333-3333-3333-333333333333';
 const LEAD_ID = '55555555-5555-5555-5555-555555555555';
 
 const mockPrisma = {
+  leadDocument: { findMany: jest.fn().mockResolvedValue([]) },
   lead: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   mortgage: { findMany: jest.fn() },
   applicant: { findMany: jest.fn() },
@@ -92,6 +93,7 @@ function leadRow(overrides: Record<string, unknown> = {}) {
     tenantId: TENANT_ID,
     brokerUserId: BROKER_ID,
     name: 'Jamie Rivera',
+    requiredDocuments: [],
     notes: 'source record',
     brokerNotes: null,
     tags: [],

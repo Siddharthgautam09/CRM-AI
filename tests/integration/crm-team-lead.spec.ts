@@ -59,6 +59,7 @@ const BROKER_A = '33333333-3333-3333-3333-333333333333';
 const BROKER_B_OUTSIDE_TEAM = '44444444-4444-4444-4444-444444444444';
 
 const mockPrisma = {
+  notification: { create: jest.fn() },
   lead: {
     create: jest.fn(),
     findUnique: jest.fn(),
@@ -107,6 +108,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   (getPrismaClient as jest.Mock).mockReturnValue(mockPrisma);
   mockPrisma.mortgage.findMany.mockResolvedValue([]);
+  mockPrisma.lead.findMany.mockResolvedValue([]);
 });
 
 describe('Flow 3 — Team Lead, HTTP layer', () => {
@@ -489,5 +491,87 @@ describe('Flow 4 core — funding a lead into a client', () => {
 
     expect(res.status).toBe(400);
     expect(mockPrisma.mortgage.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('Assistant (SOW 2.5) — view/edit the team book, never create/delete/reveal', () => {
+  const ASSISTANT_ID = '55555555-5555-5555-5555-555555555555';
+  const LEAD_ID = '11111111-1111-1111-1111-111111111111';
+
+  function mockAssistant(teamId: string | null = TEAM_ID) {
+    (getModAuthPerson as jest.Mock).mockResolvedValue({
+      userId: ASSISTANT_ID,
+      tenantId: TENANT_ID,
+      role: 'ASSISTANT',
+      teamId,
+      name: 'Ann Assistant',
+      active: true,
+    });
+  }
+
+  function auth() {
+    return { Authorization: `Bearer ${tokenFor(ASSISTANT_ID)}` };
+  }
+
+  it("lists the whole team's leads, not just their own", async () => {
+    mockAssistant();
+    mockRoster();
+    mockPrisma.lead.findMany.mockResolvedValue([]);
+
+    const res = await request(app).get(`${BASE}/leads`).set(auth());
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ brokerUserId: { in: [LEAD_USER_ID, BROKER_A] } }),
+      }),
+    );
+  });
+
+  it("opens a teammate's lead but gets 403 outside the team", async () => {
+    mockAssistant();
+    mockRoster();
+    mockPrisma.lead.findUnique.mockResolvedValueOnce({
+      id: LEAD_ID,
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_A,
+      sin: null,
+      bankDetails: null,
+    });
+    const inside = await request(app).get(`${BASE}/leads/${LEAD_ID}`).set(auth());
+    expect(inside.status).toBe(200);
+
+    mockPrisma.lead.findUnique.mockResolvedValueOnce({
+      id: LEAD_ID,
+      tenantId: TENANT_ID,
+      brokerUserId: BROKER_B_OUTSIDE_TEAM,
+      sin: null,
+      bankDetails: null,
+    });
+    const outside = await request(app).get(`${BASE}/leads/${LEAD_ID}`).set(auth());
+    expect(outside.status).toBe(403);
+  });
+
+  it('cannot create a lead, delete intake records, or reveal sensitive fields', async () => {
+    mockAssistant();
+    mockRoster();
+
+    const create = await request(app).post(`${BASE}/leads`).set(auth()).send({});
+    const del = await request(app).delete(`${BASE}/leads/${LEAD_ID}/debts/${LEAD_ID}`).set(auth());
+    const reveal = await request(app)
+      .post(`${BASE}/leads/${LEAD_ID}/reveal`)
+      .set(auth())
+      .send({ field: 'sin' });
+
+    expect([create.status, del.status, reveal.status]).toEqual([403, 403, 403]);
+  });
+
+  it('is rejected when not assigned to a team', async () => {
+    mockAssistant(null);
+
+    const res = await request(app).get(`${BASE}/leads`).set(auth());
+
+    expect(res.status).toBe(403);
+    expect(resolveTeam).not.toHaveBeenCalled();
   });
 });

@@ -38,7 +38,8 @@ public class ModAuthLoginController {
 
     @Operation(summary = "Log in", description = "Runs the full \"Logging in\" flow: lockout guard, credential check, "
             + "account-active check, terms-changed gate, then issues tokens and a dashboard hint. "
-            + "On the fifth failed attempt in the window the account locks for 15 minutes (429).")
+            + "On the fifth failed attempt in the window the account locks for 15 minutes (429) and a warning "
+            + "email is sent. A suspended or cancelled brokerage gets 403.")
     @ApiResponse(responseCode = "200", description = "Either real tokens, or requiresTermsAcceptance=true with none yet")
     @ApiResponse(responseCode = "401", description = "Invalid credentials")
     @ApiResponse(responseCode = "403", description = "Account deactivated — contact your admin")

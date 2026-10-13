@@ -15,3 +15,5 @@ coverage
 # `dist` pattern above, which would otherwise match these nested paths too.
 !lib/Gen_Sup-main/packages/gen-sup-starter/dist
 !lib/Gen_Usg-main/packages/gen-usg-starter/dist
+
+storage/

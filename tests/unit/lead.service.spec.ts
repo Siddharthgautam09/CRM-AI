@@ -1,9 +1,13 @@
 jest.mock('../../modules/platform/activity-log');
 jest.mock('../../config/database');
+jest.mock('../../modules/crm/document-storage');
 
 import { getPrismaClient } from '../../config/database';
+import { removeStoredFiles } from '../../modules/crm/document-storage';
 import { decryptToken, encryptToken } from '../../modules/crm/encryption';
 import {
+  deleteLead,
+  reassignAll,
   activeAssignedLeadCount,
   addMortgage,
   createLead,
@@ -26,6 +30,8 @@ import {
 import { listActivity, recordActivity } from '../../modules/platform/activity-log';
 
 const mockPrisma = {
+  leadDocument: { findMany: jest.fn().mockResolvedValue([]) },
+  notification: { create: jest.fn() },
   lead: {
     create: jest.fn(),
     findUnique: jest.fn(),
@@ -33,7 +39,10 @@ const mockPrisma = {
     update: jest.fn(),
     groupBy: jest.fn(),
     count: jest.fn(),
+    updateMany: jest.fn(),
+    delete: jest.fn(),
   },
+  task: { updateMany: jest.fn() },
   mortgage: {
     create: jest.fn(),
     findMany: jest.fn(),
@@ -106,7 +115,7 @@ describe('updateStage — "Change the stage to Lost"', () => {
     await updateStage(TENANT, 'lead-1', ['b1'], 'QUALIFIED');
     expect(mockPrisma.lead.update).toHaveBeenCalledWith({
       where: { id: 'lead-1' },
-      data: { stage: 'QUALIFIED', lostReason: null },
+      data: { stage: 'QUALIFIED', lostReason: null, lostNote: null },
     });
   });
 });
@@ -235,10 +244,14 @@ describe('createLead — "New client"', () => {
 describe('listMyLeads — "Leads (not funded yet)"', () => {
   it("scopes to the caller's own tenant and broker id, excluding Funded/Lost", async () => {
     mockPrisma.lead.findMany.mockResolvedValue([]);
-    await listMyLeads(TENANT, 'me');
+    await listMyLeads(TENANT, ['me']);
     expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { tenantId: TENANT, brokerUserId: 'me', stage: { notIn: ['FUNDED', 'LOST'] } },
+        where: {
+          tenantId: TENANT,
+          brokerUserId: { in: ['me'] },
+          stage: { notIn: ['FUNDED', 'LOST'] },
+        },
       }),
     );
   });
@@ -247,10 +260,10 @@ describe('listMyLeads — "Leads (not funded yet)"', () => {
 describe('listMyClients — "Clients (funded)"', () => {
   it('scopes to Funded leads only and includes their mortgages', async () => {
     mockPrisma.lead.findMany.mockResolvedValue([]);
-    await listMyClients(TENANT, 'me');
+    await listMyClients(TENANT, ['me']);
     expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { tenantId: TENANT, brokerUserId: 'me', stage: 'FUNDED' },
+        where: { tenantId: TENANT, brokerUserId: { in: ['me'] }, stage: 'FUNDED' },
         include: { mortgages: true },
       }),
     );
@@ -515,6 +528,7 @@ describe('revealSensitiveField — "Reveal... the reveal is recorded"', () => {
 describe('getPersonPanel — "same panel everywhere"', () => {
   it('aggregates profile, mortgages, notes (original/yours/history) and recent activity', async () => {
     mockPrisma.lead.findUnique.mockResolvedValue({
+      requiredDocuments: [],
       id: 'lead-1',
       tenantId: TENANT,
       brokerUserId: 'me',
@@ -539,5 +553,60 @@ describe('getPersonPanel — "same panel everywhere"', () => {
       history: [{ action: 'crm.notes.updated' }],
     });
     expect(panel.activity).toEqual([{ action: 'crm.lead.reassigned' }]);
+  });
+});
+
+describe('deleteLead — Flow 4.11 "type their name to confirm"', () => {
+  beforeEach(() => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: 'lead-1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      name: 'Pat Client',
+    });
+    mockPrisma.leadDocument.findMany.mockResolvedValue([{ storagePath: 'tenant-1/key' }]);
+  });
+
+  it('refuses unless the typed name matches', async () => {
+    await expect(deleteLead(TENANT, 'lead-1', ['me'], 'Pat', 'me')).rejects.toMatchObject({
+      statusCode: 400,
+    });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('deletes permanently, leaves tasks unlinked, removes stored files, and records it', async () => {
+    await deleteLead(TENANT, 'lead-1', ['me'], ' Pat Client ', 'me');
+    expect(mockPrisma.task.updateMany).toHaveBeenCalledWith({
+      where: { leadId: 'lead-1' },
+      data: { unlinked: true },
+    });
+    expect(mockPrisma.lead.delete).toHaveBeenCalledWith({ where: { id: 'lead-1' } });
+    expect(mockPrisma.$transaction).toHaveBeenCalled();
+    expect(removeStoredFiles).toHaveBeenCalledWith(['tenant-1/key']);
+    expect(recordActivity).toHaveBeenCalledWith(
+      'crm.lead.deleted',
+      expect.objectContaining({ targetId: 'lead-1' }),
+    );
+  });
+});
+
+describe('reassignAll — Flow 2 "reassign their clients first"', () => {
+  it('moves every lead and notifies both brokers', async () => {
+    mockPrisma.lead.findMany.mockResolvedValue([
+      { id: 'l1', name: 'A' },
+      { id: 'l2', name: 'B' },
+    ]);
+    const result = await reassignAll(TENANT, 'leaving', 'receiving', 'admin');
+    expect(result).toEqual({ reassigned: 2 });
+    expect(mockPrisma.lead.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: TENANT, brokerUserId: 'leaving' },
+      data: { brokerUserId: 'receiving' },
+    });
+    const notified = mockPrisma.notification.create.mock.calls.map((c) => c[0].data.userId);
+    expect(notified.sort()).toEqual(['leaving', 'receiving']);
+  });
+
+  it("won't reassign to the same person", async () => {
+    await expect(reassignAll(TENANT, 'x', 'x', 'admin')).rejects.toMatchObject({ statusCode: 400 });
   });
 });

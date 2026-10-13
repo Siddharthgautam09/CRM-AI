@@ -249,4 +249,36 @@ class TeamServiceImplTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Not allowed to view this team");
     }
+
+    @Test
+    void anAssistantOnTheTeamCanViewItsRoster() {
+        TeamEntity team = TeamEntity.builder().id(UUID.randomUUID()).tenantId(tenantId).name("X").teamLeadUserId(leadId).build();
+        UUID assistantId = UUID.randomUUID();
+        ModAuthUserRoleEntity assistant = roleRow(assistantId, tenantId, Role.ASSISTANT);
+        assistant.setTeamId(team.getId());
+        AuthenticatedUser caller = new AuthenticatedUser(assistantId, tenantId, "acme", List.of(), UserType.TENANT_USER,
+                "session", null, "jti");
+        when(teamRepo.findById(team.getId())).thenReturn(Optional.of(team));
+        when(roleResolver.resolve(caller)).thenReturn(Role.ASSISTANT);
+        when(roleRepo.findById(assistantId)).thenReturn(Optional.of(assistant));
+
+        assertThat(service.get(caller, team.getId()).id()).isEqualTo(team.getId());
+    }
+
+    @Test
+    void anAssistantOnAnotherTeamCannotViewThisRoster() {
+        TeamEntity team = TeamEntity.builder().id(UUID.randomUUID()).tenantId(tenantId).name("X").teamLeadUserId(leadId).build();
+        UUID assistantId = UUID.randomUUID();
+        ModAuthUserRoleEntity assistant = roleRow(assistantId, tenantId, Role.ASSISTANT);
+        assistant.setTeamId(UUID.randomUUID());
+        AuthenticatedUser caller = new AuthenticatedUser(assistantId, tenantId, "acme", List.of(), UserType.TENANT_USER,
+                "session", null, "jti");
+        when(teamRepo.findById(team.getId())).thenReturn(Optional.of(team));
+        when(roleResolver.resolve(caller)).thenReturn(Role.ASSISTANT);
+        when(roleRepo.findById(assistantId)).thenReturn(Optional.of(assistant));
+
+        assertThatThrownBy(() -> service.get(caller, team.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Not allowed to view this team");
+    }
 }

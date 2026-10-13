@@ -2,9 +2,12 @@ import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 
 import * as affordabilityService from './affordability.service';
+import { bookBrokerIds, leadAccessIds } from './crm-auth.middleware';
+import * as dashboardService from './dashboard.service';
 import * as calendarService from './google/calendar.service';
 import * as leadService from './lead.service';
 import { resolveTeam } from './modauth.client';
+import * as notificationService from './notification.service';
 import * as taskService from './task.service';
 import { teamWorkload } from './workload.service';
 import { ApiError } from '../../utils/api-error';
@@ -33,21 +36,23 @@ export const createLeadHandler = asyncHandler(async (req: Request, res: Response
 
 export const listMyLeadsHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
-  const leads = await leadService.listMyLeads(user.tenantId, user.userId);
+  const leads = await leadService.listMyLeads(user.tenantId, await bookBrokerIds(user));
   res.status(StatusCodes.OK).json({ success: true, data: leads });
 });
 
 export const listMyClientsHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
-  const clients = await leadService.listMyClients(user.tenantId, user.userId);
+  const clients = await leadService.listMyClients(user.tenantId, await bookBrokerIds(user));
   res.status(StatusCodes.OK).json({ success: true, data: clients });
 });
 
 export const getMyLeadHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
-  const lead = await leadService.getLeadWithAccess(user.tenantId, req.params.id as string, [
-    user.userId,
-  ]);
+  const lead = await leadService.getLeadWithAccess(
+    user.tenantId,
+    req.params.id as string,
+    await leadAccessIds(user),
+  );
   res.status(StatusCodes.OK).json({ success: true, data: leadService.maskLead(lead) });
 });
 
@@ -55,9 +60,11 @@ export const getMyLeadHandler = asyncHandler(async (req: Request, res: Response)
 
 export const getPersonPanelHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
-  const panel = await leadService.getPersonPanel(user.tenantId, req.params.id as string, [
-    user.userId,
-  ]);
+  const panel = await leadService.getPersonPanel(
+    user.tenantId,
+    req.params.id as string,
+    await leadAccessIds(user),
+  );
   res.status(StatusCodes.OK).json({ success: true, data: panel });
 });
 
@@ -66,7 +73,7 @@ export const getAffordabilityHandler = asyncHandler(async (req: Request, res: Re
   const result = await affordabilityService.getAffordability(
     user.tenantId,
     req.params.id as string,
-    [user.userId],
+    await leadAccessIds(user),
   );
   res.status(StatusCodes.OK).json({ success: true, data: result });
 });
@@ -76,7 +83,7 @@ export const recalculateAffordabilityHandler = asyncHandler(async (req: Request,
   const user = crmUser(req);
   const summary = await affordabilityService.recalculateForBook(
     user.tenantId,
-    [user.userId],
+    await bookBrokerIds(user),
     req.body.leadIds,
   );
   res.status(StatusCodes.OK).json({ success: true, data: summary });
@@ -87,7 +94,7 @@ export const updateNotesHandler = asyncHandler(async (req: Request, res: Respons
   const lead = await leadService.updateNotes(
     user.tenantId,
     req.params.id as string,
-    [user.userId],
+    await leadAccessIds(user),
     req.body.brokerNotes,
     user.userId,
   );
@@ -99,7 +106,7 @@ export const updateTagsHandler = asyncHandler(async (req: Request, res: Response
   const lead = await leadService.updateTags(
     user.tenantId,
     req.params.id as string,
-    [user.userId],
+    await leadAccessIds(user),
     req.body.tags,
   );
   res.status(StatusCodes.OK).json({ success: true, data: lead });
@@ -111,7 +118,7 @@ export const updateLeadProfileHandler = asyncHandler(async (req: Request, res: R
   const lead = await leadService.updateLeadProfile(
     user.tenantId,
     req.params.id as string,
-    [user.userId],
+    await leadAccessIds(user),
     req.body,
   );
   res.status(StatusCodes.OK).json({ success: true, data: lead });
@@ -122,7 +129,7 @@ export const revealFieldHandler = asyncHandler(async (req: Request, res: Respons
   const revealed = await leadService.revealSensitiveField(
     user.tenantId,
     req.params.id as string,
-    [user.userId],
+    await leadAccessIds(user),
     req.body.field,
     user.userId,
   );
@@ -134,9 +141,10 @@ export const updateMyLeadStageHandler = asyncHandler(async (req: Request, res: R
   const lead = await leadService.updateStage(
     user.tenantId,
     req.params.id as string,
-    [user.userId],
+    await leadAccessIds(user),
     req.body.stage,
     req.body.lostReason,
+    req.body.lostNote,
   );
   res.status(StatusCodes.OK).json({ success: true, data: lead });
 });
@@ -146,7 +154,7 @@ export const fundLeadHandler = asyncHandler(async (req: Request, res: Response) 
   const lead = await leadService.fundLead(
     user.tenantId,
     req.params.id as string,
-    [user.userId],
+    await leadAccessIds(user),
     req.body,
   );
   res.status(StatusCodes.OK).json({ success: true, data: lead });
@@ -157,7 +165,7 @@ export const addMortgageHandler = asyncHandler(async (req: Request, res: Respons
   const mortgage = await leadService.addMortgage(
     user.tenantId,
     req.params.id as string,
-    [user.userId],
+    await leadAccessIds(user),
     req.body,
   );
   res.status(StatusCodes.CREATED).json({ success: true, data: mortgage });
@@ -179,6 +187,73 @@ export const completeTaskHandler = asyncHandler(async (req: Request, res: Respon
   const user = crmUser(req);
   const task = await taskService.completeTask(user.tenantId, user.userId, req.params.id as string);
   res.status(StatusCodes.OK).json({ success: true, data: task });
+});
+
+export const approveSuggestedTaskHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const task = await taskService.approveSuggestedTask(
+    user.tenantId,
+    user.userId,
+    req.params.id as string,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: task });
+});
+
+export const deleteTaskHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  await taskService.deleteTask(user.tenantId, user.userId, req.params.id as string);
+  res.status(StatusCodes.NO_CONTENT).send();
+});
+
+export const linkTaskHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const task = await taskService.linkTask(
+    user.tenantId,
+    user.userId,
+    req.params.id as string,
+    req.body.leadId,
+    await leadAccessIds(user),
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: task });
+});
+
+/** Flow 4.11 "Delete this person" — own book only (an Assistant can't delete). */
+export const deleteLeadHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  await leadService.deleteLead(
+    user.tenantId,
+    req.params.id as string,
+    await leadAccessIds(user),
+    req.body.confirmName,
+    user.userId,
+  );
+  res.status(StatusCodes.NO_CONTENT).send();
+});
+
+export const brokerDashboardHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const data = await dashboardService.brokerDashboard(user.tenantId, await bookBrokerIds(user));
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const searchHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const leads = await dashboardService.searchBook(
+    user.tenantId,
+    await bookBrokerIds(user),
+    req.query.q as string,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: leads });
+});
+
+export const listNotificationsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const items = await notificationService.listMyNotifications(crmUser(req).userId);
+  res.status(StatusCodes.OK).json({ success: true, data: items });
+});
+
+export const markNotificationReadHandler = asyncHandler(async (req: Request, res: Response) => {
+  const item = await notificationService.markRead(crmUser(req).userId, req.params.id as string);
+  res.status(StatusCodes.OK).json({ success: true, data: item });
 });
 
 // ── Team Lead's team-scoped views (Flow 3) ───────────────────────────────────

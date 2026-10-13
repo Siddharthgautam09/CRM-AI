@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { requireSuperAdmin } from './auth-jwt.middleware';
 import { requireInternalSecret } from './internal-secret.middleware';
 import {
+  authEventWebhookHandler,
   allowExtraTodayHandler,
   createBrokerageHandler,
   downloadExportHandler,
@@ -24,6 +25,7 @@ import {
   brokerageIdParamSchema,
   createBrokerageSchema,
   listBrokeragesSchema,
+  authEventWebhookSchema,
   ownerAcceptedWebhookSchema,
   reactivateBrokerageSchema,
   simulateUsageSchema,
@@ -42,6 +44,13 @@ platformRouter.post(
   requireInternalSecret,
   validate(ownerAcceptedWebhookSchema),
   ownerAcceptedWebhookHandler,
+);
+
+platformRouter.post(
+  '/webhooks/auth-events',
+  requireInternalSecret,
+  validate(authEventWebhookSchema),
+  authEventWebhookHandler,
 );
 
 // Everything else is the Super Admin console — JWT-authenticated.

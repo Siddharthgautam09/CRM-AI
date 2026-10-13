@@ -7,6 +7,7 @@ import type { BrokerageExportJobDto, TenantRecord } from './platform.types';
 import { getPrismaClient } from '../../config/database';
 import { env } from '../../config/env';
 import { ApiError } from '../../utils/api-error';
+import { removeStoredFiles, storedFilePath } from '../crm/document-storage';
 
 const EXPORT_DIR = path.join(process.cwd(), 'storage', 'brokerage-exports');
 
@@ -26,26 +27,74 @@ function toDto(row: {
   };
 }
 
+interface ExportPackage {
+  json: Record<string, unknown>;
+  sheets: Record<string, Record<string, unknown>[]>;
+  documents: { name: string; storagePath: string }[];
+}
+
 /**
- * ponytail: this repo has no real "client records/documents" data model to
- * export yet (modules/document was removed) — the manifest packages what
- * genuinely exists (the tenant record itself) rather than fabricating a fake
- * documents store. The team roster lives in modules/auth's own database (a
- * separate service/Postgres), not this one, so pulling it in here would need
- * a real internal API call — add one if a real export needs it; noted below
- * instead of silently omitted.
+ * Flow 1 "Their data is packaged: spreadsheets plus a zip of documents" — one
+ * CSV per record type and every stored document file. SIN/bank details stay
+ * masked (hasSin/hasBankDetails), never exported in plain text. The team
+ * roster lives in modules/auth's own database and isn't included.
  */
-function buildManifest(tenant: TenantRecord): Record<string, unknown> {
+async function crmDataPackage(tenantId: string): Promise<Omit<ExportPackage, 'json'>> {
+  const db = getPrismaClient();
+  const byLead = { lead: { tenantId } };
+  const [
+    leads,
+    mortgages,
+    tasks,
+    appointments,
+    contacts,
+    applicants,
+    debts,
+    properties,
+    fundsSources,
+    followUps,
+    documents,
+  ] = await Promise.all([
+    db.lead.findMany({ where: { tenantId } }),
+    db.mortgage.findMany({ where: byLead }),
+    db.task.findMany({ where: { tenantId } }),
+    db.appointment.findMany({ where: { tenantId } }),
+    db.contact.findMany({ where: { tenantId } }),
+    db.applicant.findMany({ where: byLead }),
+    db.debt.findMany({ where: byLead }),
+    db.propertyRecord.findMany({ where: byLead }),
+    db.fundsSource.findMany({ where: byLead }),
+    db.followUp.findMany({ where: byLead }),
+    db.leadDocument.findMany({ where: { tenantId } }),
+  ]);
   return {
-    exportedAt: new Date().toISOString(),
-    brokerage: tenant,
-    note: 'Team roster lives in modules/auth, not exported here yet — see export.service.ts.',
+    sheets: {
+      leads: leads.map(({ sin, bankDetails, ...rest }) => ({
+        ...rest,
+        hasSin: sin !== null,
+        hasBankDetails: bankDetails !== null,
+      })),
+      mortgages,
+      tasks,
+      appointments,
+      contacts,
+      applicants,
+      debts,
+      properties,
+      fundsSources,
+      followUps,
+      documents: documents.map((d) => ({ ...d, storagePath: undefined })),
+    },
+    documents: documents.map((d) => ({
+      name: `documents/${d.leadId}/${d.id}-${d.fileName}`,
+      storagePath: d.storagePath,
+    })),
   };
 }
 
 async function runExportJob(
   tenantId: string,
-  buildJobManifest: () => Promise<Record<string, unknown>> | Record<string, unknown>,
+  buildPackage: () => Promise<ExportPackage>,
 ): Promise<BrokerageExportJobDto> {
   await mkdir(EXPORT_DIR, { recursive: true });
 
@@ -56,7 +105,7 @@ async function runExportJob(
   const filePath = path.join(EXPORT_DIR, `${job.id}.zip`);
 
   try {
-    await writeZip(filePath, await buildJobManifest());
+    await writeZip(filePath, await buildPackage());
     const now = new Date();
     const readyAt = now;
     const expiresAt = new Date(
@@ -78,33 +127,58 @@ async function runExportJob(
 }
 
 export async function startExport(tenant: TenantRecord): Promise<BrokerageExportJobDto> {
-  return runExportJob(tenant.id, () => buildManifest(tenant));
+  return runExportJob(tenant.id, async () => ({
+    json: { exportedAt: new Date().toISOString(), brokerage: tenant },
+    ...(await crmDataPackage(tenant.id)),
+  }));
 }
 
 /**
- * Tenant Admin's self-service "Export all our data" (Flow 2) — distinct
- * from the Super-Admin-triggered cancellation export above: this one
- * packages the tenant's actual CRM data (leads/clients, their mortgages,
- * tasks), which didn't exist when that export was first written.
+ * Tenant Admin's self-service "Export all our data" (Flow 2) — the same CRM
+ * package as the Super-Admin-triggered cancellation export above.
  */
 export async function startSelfServiceExport(tenantId: string): Promise<BrokerageExportJobDto> {
-  return runExportJob(tenantId, async () => {
-    const [leads, tasks] = await Promise.all([
-      getPrismaClient().lead.findMany({ where: { tenantId }, include: { mortgages: true } }),
-      getPrismaClient().task.findMany({ where: { tenantId } }),
-    ]);
-    return { exportedAt: new Date().toISOString(), tenantId, leads, tasks };
-  });
+  return runExportJob(tenantId, async () => ({
+    json: { exportedAt: new Date().toISOString(), tenantId },
+    ...(await crmDataPackage(tenantId)),
+  }));
 }
 
-function writeZip(filePath: string, manifest: Record<string, unknown>): Promise<void> {
+/** Spreadsheet-safe CSV: quotes where needed, and a leading ' on cells a spreadsheet would run as a formula. */
+export function toCsv(rows: Record<string, unknown>[]): string {
+  const columns = [
+    ...new Set(rows.flatMap((r) => Object.keys(r).filter((k) => r[k] !== undefined))),
+  ];
+  const cell = (value: unknown) => {
+    if (value === null || value === undefined) return '';
+    let text =
+      value instanceof Date
+        ? value.toISOString()
+        : typeof value === 'object'
+          ? JSON.stringify(value)
+          : String(value);
+    if (/^[=+\-@]/.test(text)) text = `'${text}`;
+    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  return [columns.join(','), ...rows.map((r) => columns.map((c) => cell(r[c])).join(','))].join(
+    '\n',
+  );
+}
+
+function writeZip(filePath: string, pkg: ExportPackage): Promise<void> {
   return new Promise((resolve, reject) => {
     const output = createWriteStream(filePath);
     const archive = archiver('zip', { zlib: { level: 9 } });
     output.on('close', resolve);
     archive.on('error', reject);
     archive.pipe(output);
-    archive.append(JSON.stringify(manifest, null, 2), { name: 'brokerage.json' });
+    archive.append(JSON.stringify(pkg.json, null, 2), { name: 'brokerage.json' });
+    for (const [name, rows] of Object.entries(pkg.sheets)) {
+      archive.append(toCsv(rows), { name: `${name}.csv` });
+    }
+    for (const doc of pkg.documents) {
+      archive.file(storedFilePath(doc.storagePath), { name: doc.name });
+    }
     void archive.finalize();
   });
 }
@@ -155,4 +229,31 @@ export async function purgeExpiredExports(): Promise<number> {
     });
   }
   return expired.length;
+}
+
+/**
+ * Flow 1 "permanently deleted after the retention period": every CRM row and
+ * stored document belonging to the brokerage. The activity log is kept — it
+ * is the platform's own audit trail, not the brokerage's data.
+ */
+export async function purgeTenantCrmData(tenantId: string): Promise<void> {
+  const db = getPrismaClient();
+  const files = [
+    ...(await db.leadDocument.findMany({ where: { tenantId }, select: { storagePath: true } })),
+    ...(await db.voiceNote.findMany({ where: { tenantId }, select: { storagePath: true } })),
+  ];
+  // Lead's own children (intake, mortgages, documents, drafts, links) cascade with it.
+  await db.$transaction([
+    db.task.deleteMany({ where: { tenantId } }),
+    db.appointment.deleteMany({ where: { tenantId } }),
+    db.lead.deleteMany({ where: { tenantId } }),
+    db.contact.deleteMany({ where: { tenantId } }),
+    db.notification.deleteMany({ where: { tenantId } }),
+    db.voiceNote.deleteMany({ where: { tenantId } }),
+    db.googleConnection.deleteMany({ where: { tenantId } }),
+    db.crmUserSettings.deleteMany({ where: { tenantId } }),
+    db.tenantProfile.deleteMany({ where: { tenantId } }),
+    db.bookingPageSettings.deleteMany({ where: { tenantId } }),
+  ]);
+  await removeStoredFiles(files.map((f) => f.storagePath));
 }

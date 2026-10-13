@@ -50,6 +50,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class ModAuthLoginServiceImplTest {
 
+    @Mock private TenantAccessService tenantAccessService;
+    @Mock private PlatformEventClient platformEvents;
     @Mock private ModAuthUserLookupRepository userLookupRepo;
     @Mock private ModAuthUserRoleJpaRepository roleRepo;
     @Mock private LockoutService lockoutService;
@@ -66,7 +68,8 @@ class ModAuthLoginServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new ModAuthLoginServiceImpl(userLookupRepo, roleRepo, lockoutService, passwordHasher, loginExecutor);
+        service = new ModAuthLoginServiceImpl(userLookupRepo, roleRepo, lockoutService, passwordHasher, loginExecutor,
+                tenantAccessService, platformEvents);
         ReflectionTestUtils.setField(service, "currentTermsVersion", 2);
     }
 
@@ -231,5 +234,21 @@ class ModAuthLoginServiceImplTest {
         service.login(request(false), IP, UA);
 
         verify(lockoutService).clearFailure(EMAIL, IP);
+    }
+
+    @Test
+    void suspendedBrokerageIsBlockedAtLoginAndNoTokensAreIssued() {
+        AuthUserEntity user = activeUser();
+        when(userLookupRepo.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+        when(passwordHasher.verify(eq(PASSWORD), eq("hashed"))).thenReturn(true);
+        when(tenantAccessService.isBlocked(user.getTenantId())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.login(request(true), IP, UA))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("suspended");
+
+        verify(loginExecutor, never()).issueTokens(any(), any(), anyString(), anyString(), org.mockito.ArgumentMatchers.anyLong());
+        verify(platformEvents).send(eq("security.login_blocked_suspended_brokerage"), eq(user.getTenantId()),
+                eq(user.getId()), eq(IP), org.mockito.ArgumentMatchers.isNull());
     }
 }

@@ -5,6 +5,7 @@ import com.example.modauth.dto.InternalUserRoleResponse;
 import com.example.modauth.entity.ModAuthUserRoleEntity;
 import com.example.modauth.repository.ModAuthUserLookupRepository;
 import com.example.modauth.repository.ModAuthUserRoleJpaRepository;
+import com.example.modauth.service.TenantAccessService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,6 +35,7 @@ public class InternalUserRoleController {
 
     private final ModAuthUserRoleJpaRepository roleRepo;
     private final ModAuthUserLookupRepository userLookupRepo;
+    private final TenantAccessService tenantAccessService;
 
     @Operation(summary = "Look up a person's platform role/team by user id")
     @ApiResponse(responseCode = "200", description = "Role found")
@@ -45,6 +47,7 @@ public class InternalUserRoleController {
         AuthUserEntity user = userLookupRepo.findById(userId).orElse(null);
         return new InternalUserRoleResponse(
                 role.getUserId(), role.getTenantId(), role.getRole(), role.getTeamId(), role.getName(),
-                user != null && user.isActive());
+                user != null && user.isActive(),
+                tenantAccessService.isBlocked(role.getTenantId()));
     }
 }

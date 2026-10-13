@@ -207,6 +207,23 @@ components:
             type: string,
             description: 'Encrypted at rest (AES-256-GCM) — never returned by any read path except the reveal endpoint.',
           }
+        acceptedTasks:
+          type: array
+          description: 'Flow 4.2 "Save" — AI-review tasks the broker accepted; created with the lead in one transaction.'
+          items:
+            type: object
+            required: [title]
+            properties:
+              title: { type: string }
+              dueDate: { type: string, format: date-time }
+        draftEmail:
+          type: object
+          description: 'Flow 4.2 — the accepted AI draft, saved (never sent) and marked AI-assisted.'
+          required: [subject, body]
+          properties:
+            intent: { type: string }
+            subject: { type: string }
+            body: { type: string }
     Affordability:
       type: object
       description: 'Ratios, stress-tested rate and maximum purchase price (Flow 4.4) — always computed live, never cached for a single read.'
@@ -278,6 +295,46 @@ components:
             items: { type: object },
             description: 'Recent activity-log entries for this lead.',
           }
+        documents:
+          type: object
+          description: 'Documents tab shell — always empty until document storage lands (SOW Module 8).'
+          properties:
+            items: { type: array, items: { type: object } }
+            missing: { type: array, items: { type: string } }
+    AiDraftEmail:
+      type: object
+      description: 'STUB — placeholder output until the AI team wires a model in.'
+      properties:
+        stub: { type: boolean, enum: [true] }
+        disclosure: { type: string }
+        intent:
+          {
+            type: string,
+            enum: [FOLLOW_UP, RENEWAL, BIRTHDAY, DOCUMENTS, ANNUAL_REVIEW, REFINANCE],
+          }
+        subject: { type: string }
+        body: { type: string }
+    AiReview:
+      type: object
+      description: 'STUB (SOW 5.14–5.23) — fixed placeholder output; only missingFields reflects the real lead.'
+      properties:
+        stub: { type: boolean, enum: [true] }
+        disclosure: { type: string }
+        summary: { type: string }
+        intent: { type: string }
+        urgency: { type: string, enum: [LOW, MEDIUM, HIGH] }
+        extractedFields: { type: object, additionalProperties: true }
+        missingFields: { type: array, items: { type: string } }
+        painPoints: { type: array, items: { type: string } }
+        opportunities: { type: array, items: { type: string } }
+        draftEmail: { $ref: '#/components/schemas/AiDraftEmail' }
+        proposedTasks:
+          type: array
+          items:
+            type: object
+            properties:
+              title: { type: string }
+              dueInDays: { type: integer }
     Mortgage:
       type: object
       properties:
@@ -316,6 +373,7 @@ components:
         title: { type: string }
         leadId: { type: string, format: uuid }
         dueDate: { type: string, format: date-time }
+        priority: { type: string, enum: [LOW, MEDIUM, HIGH], default: MEDIUM }
     BrokerWorkload:
       type: object
       description: >
@@ -367,7 +425,7 @@ paths:
                   data: { $ref: '#/components/schemas/Lead' }
     get:
       tags: [CRM]
-      summary: 'My leads — not yet funded and not lost'
+      summary: "My leads — not yet funded and not lost (an Assistant sees their whole team's)"
       security: [{ crmBearer: [] }]
       responses:
         '200':
@@ -415,6 +473,28 @@ paths:
         '404':
           description: Not found
 
+    delete:
+      tags: [CRM]
+      summary: 'Delete this person permanently (Flow 4.11)'
+      description: >
+        Body must repeat the person's name exactly. Their tasks stay, marked unlinked. Recorded in the activity log. Broker/Team Lead only.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmName]
+              properties:
+                confirmName: { type: string }
+      responses:
+        '204':
+          description: 'Deleted'
+        '400':
+          description: 'Name did not match'
   /crm/leads/{id}/stage:
     patch:
       tags: [CRM]
@@ -439,7 +519,8 @@ paths:
                     type: string,
                     enum: [NEW, QUALIFIED, APPLICATION, UNDERWRITING, APPROVED, LOST],
                   }
-                lostReason: { type: string }
+                lostReason: { type: string, description: 'Required when moving to LOST' }
+                lostNote: { type: string, description: 'Optional, only kept with LOST' }
       responses:
         '200':
           description: Updated
@@ -982,6 +1063,105 @@ paths:
                   success: { type: boolean }
                   data: { $ref: '#/components/schemas/Lead' }
 
+  /crm/ai/email-intents:
+    get:
+      tags: [CRM]
+      summary: 'AI Tools tab — email intents to draft for'
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: '[{ key, label }]'
+
+  /crm/leads/{id}/ai/review:
+    post:
+      tags: [CRM]
+      summary: 'AI note review (SOW 5.14–5.23) — STUB'
+      description: >
+        Placeholder output behind the real access check and the brokerage's
+        Gen_USG daily AI cost limit. Broker, Team Lead, or the team's Assistant.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The review
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/AiReview' }
+        '403':
+          description: "You don't have access to this record"
+        '429':
+          description: 'AI paused for the brokerage today (daily cost limit reached)'
+
+  /crm/leads/{id}/ai/draft-email:
+    post:
+      tags: [CRM]
+      summary: 'AI Tools tab — draft an email — STUB'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [intent]
+              properties:
+                intent:
+                  {
+                    type: string,
+                    enum: [FOLLOW_UP, RENEWAL, BIRTHDAY, DOCUMENTS, ANNUAL_REVIEW, REFINANCE],
+                  }
+      responses:
+        '200':
+          description: The draft
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/AiDraftEmail' }
+        '429':
+          description: 'AI paused for the brokerage today (daily cost limit reached)'
+
+  /crm/leads/{id}/ai/apply:
+    post:
+      tags: [CRM]
+      summary: 'Apply reviewed fields — blank fields only (SOW 5.21)'
+      description: Fields the lead already has are never overwritten; they come back in `skipped`.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fields]
+              properties:
+                fields:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    email: { type: string, format: email }
+                    phone: { type: string }
+                    city: { type: string }
+                    propertyAddress: { type: string }
+                    propertyValue: { type: number }
+                    income: { type: number }
+                    monthlyDebts: { type: number }
+                    downPayment: { type: number }
+      responses:
+        '200':
+          description: '{ lead, applied: string[], skipped: string[] }'
+
   /crm/leads/{id}/reveal:
     post:
       tags: [CRM]
@@ -1294,11 +1474,17 @@ paths:
                   {
                     type: string,
                     example: acme-realty,
-                    description: Lowercase letters,
-                    numbers and hyphens only.,
+                    description: 'Lowercase letters, numbers and hyphens only.',
                   }
                 enabled: { type: boolean }
                 bufferMinutes: { type: integer, minimum: 0, maximum: 240 }
+                defaultBrokerUserId:
+                  {
+                    type: string,
+                    format: uuid,
+                    nullable: true,
+                    description: 'Receives brand-new leads from the public booking page (Flow 4.8).',
+                  }
       responses:
         '200':
           description: Updated
@@ -1594,6 +1780,559 @@ paths:
                 properties:
                   success: { type: boolean }
                   data: { type: array, items: { $ref: '#/components/schemas/Contact' } }
+
+  /crm/voice-notes:
+    post:
+      summary: 'Voice note → transcript (Flow 4.1) — transcription is a STUB'
+      description: >
+        Send the audio as the raw request body (audio/*, up to 10MB). The
+        recording is always kept (30 days). If AI is switched off or the daily
+        allowance is used up you still get 201 with transcribed false and the
+        reason — retry later with /crm/voice-notes/{id}/transcribe, or type the notes.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          audio/*:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: '{ voiceNoteId, transcribed, transcript, reason? }'
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  {
+                    voiceNoteId: 3f1c…,
+                    transcribed: true,
+                    transcript: '[Placeholder transcript]',
+                    stub: true,
+                  }
+
+  /crm/voice-notes/{id}/transcribe:
+    post:
+      summary: 'Retry transcribing a saved voice note — STUB'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: '{ voiceNoteId, transcribed, transcript, reason? }' }
+
+  /crm/ai/review-notes:
+    post:
+      tags: [CRM]
+      summary: 'Analyse notes before saving (Flow 4.1 → 4.2) — STUB'
+      description: >
+        Stateless: nothing is created, so Discard needs no call. Save = POST /crm/leads with acceptedTasks and draftEmail.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notes]
+              properties:
+                name: { type: string }
+                notes: { type: string }
+                fields:
+                  {
+                    type: object,
+                    description: 'What is already typed into the form — only used to report what is missing.',
+                  }
+      responses:
+        '200':
+          description: 'AiReview'
+        '403':
+          description: 'AI switched off in settings'
+        '429':
+          description: 'Daily AI allowance used up'
+
+  /crm/ai/assistant:
+    post:
+      tags: [CRM]
+      summary: 'AI Assistant (Flow 4.10) — STUB, read-only'
+      description: >
+        Answers only from records the caller may see (own book; a Team Lead sees the team). It cannot create, change, send or delete.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string }
+      responses:
+        '200':
+          description: '{ stub, readOnly: true, answer, records: [{ leadId, name }] }'
+        '429':
+          description: 'Daily AI allowance used up — resets at midnight UTC'
+
+  /crm/leads/{id}/ai/suggest-tasks:
+    post:
+      tags: [CRM]
+      summary: 'Suggest follow-up tasks (Flow 4.9) — STUB'
+      description: >
+        Stored as suggested tasks for the lead's broker, who approves or dismisses them.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201':
+          description: 'The suggested tasks'
+
+  /crm/leads/{id}/email-drafts:
+    post:
+      tags: [CRM]
+      summary: 'Save an email draft — nothing is sent (Flow 4.7)'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject, body]
+              properties:
+                intent:
+                  {
+                    type: string,
+                    enum: [FOLLOW_UP, RENEWAL, BIRTHDAY, DOCUMENTS, ANNUAL_REVIEW, REFINANCE],
+                  }
+                subject: { type: string }
+                body: { type: string }
+                aiAssisted: { type: boolean }
+      responses:
+        '201':
+          description: 'Draft saved'
+    get:
+      tags: [CRM]
+      summary: "This person's saved drafts"
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/email-drafts/{draftId}:
+    patch:
+      tags: [CRM]
+      summary: 'Edit a saved draft'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: draftId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                intent: { type: string }
+                subject: { type: string }
+                body: { type: string }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/settings:
+    get:
+      tags: [CRM]
+      summary: 'My CRM settings (Flow 4.12)'
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: '{ aiEnabled }'
+    patch:
+      tags: [CRM]
+      summary: 'AI features on or off (Flow 4.12)'
+      description: >
+        Switched off, every AI endpoint returns 403 and the frontend hides its buttons.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [aiEnabled]
+              properties:
+                aiEnabled: { type: boolean }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/tasks/{id}/approve:
+    patch:
+      tags: [CRM]
+      summary: 'Approve a suggested task — it becomes a real task (Flow 4.9)'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 'OK'
+        '409':
+          description: 'Not a suggested task'
+
+  /crm/tasks/{id}:
+    delete:
+      tags: [CRM]
+      summary: 'Dismiss a suggested task, or delete an unlinked one (Flow 4.9)'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204':
+          description: 'Deleted'
+        '409':
+          description: 'A real, linked task is completed, not deleted'
+
+  /crm/tasks/{id}/link:
+    patch:
+      tags: [CRM]
+      summary: 'Reassign an unlinked task to another person (Flow 4.9)'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leadId]
+              properties:
+                leadId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/dashboard:
+    get:
+      tags: [CRM]
+      summary: 'Broker dashboard (Flow 4)'
+      description: >
+        Hot leads, pipeline, portfolio value, renewals, today's meetings, follow-ups, birthdays, tasks due/overdue, missing documents; AI suggestions and refinance opportunities are stubs (empty).
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/search:
+    get:
+      tags: [CRM]
+      summary: "Search the caller's book → person panel"
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/notifications:
+    get:
+      tags: [CRM]
+      summary: 'My notifications — reminders, digest, "broker notified" events'
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/notifications/{id}/read:
+    patch:
+      tags: [CRM]
+      summary: 'Mark a notification read'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/leads/{id}/documents:
+    get:
+      tags: [CRM]
+      summary: 'Documents tab — received, ticked, missing (Flow 4.5)'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 'OK'
+    post:
+      tags: [CRM]
+      summary: 'Upload a file yourself (Flow 4.5)'
+      description: >
+        Raw file as the request body. Virus check (stub) → stored → read (OCR stub) → broker reviews the values.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - {
+            name: type,
+            in: query,
+            required: true,
+            schema:
+              {
+                type: string,
+                enum:
+                  [
+                    ID,
+                    T4,
+                    NOA,
+                    PAY_STUB,
+                    EMPLOYMENT_LETTER,
+                    BANK_STATEMENT,
+                    PURCHASE_AGREEMENT,
+                    MORTGAGE_STATEMENT,
+                    PROPERTY_TAX,
+                    OTHER,
+                  ],
+              },
+          }
+        - { name: fileName, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          '*/*':
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: 'Stored'
+        '413':
+          description: 'Too large'
+        '422':
+          description: 'Failed the virus check — not stored'
+
+  /crm/leads/{id}/documents/required:
+    put:
+      tags: [CRM]
+      summary: 'Tick which documents this person needs to send'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [types]
+              properties:
+                types:
+                  {
+                    type: array,
+                    items:
+                      {
+                        type: string,
+                        enum:
+                          [
+                            ID,
+                            T4,
+                            NOA,
+                            PAY_STUB,
+                            EMPLOYMENT_LETTER,
+                            BANK_STATEMENT,
+                            PURCHASE_AGREEMENT,
+                            MORTGAGE_STATEMENT,
+                            PROPERTY_TAX,
+                            OTHER,
+                          ],
+                      },
+                  }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/leads/{id}/documents/request:
+    post:
+      tags: [CRM]
+      summary: 'Request documents — email a 7-day link (Flow 4.5)'
+      description: >
+        From the broker's connected inbox; 409 if not connected unless useSystemAddress is true (system mail is a stub). Calling again generates a new link.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                useSystemAddress: { type: boolean }
+      responses:
+        '201':
+          description: '{ url, expiresAt, sentVia, missing }'
+        '409':
+          description: 'Connect your email, or send from the system address'
+
+  /crm/documents/{documentId}/apply:
+    post:
+      tags: [CRM]
+      summary: 'Accept extracted values — fills blank fields only'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fields]
+              properties:
+                fields: { type: object }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/documents/{documentId}/download:
+    get:
+      tags: [CRM]
+      summary: 'Download a document (recorded in the activity log)'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/tenant/dashboard:
+    get:
+      tags: [CRM]
+      summary: 'Brokerage dashboard (Flow 2)'
+      description: >
+        403 until the brokerage profile is complete (Flow 0).
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: 'OK'
+
+  /crm/tenant/people/{userId}/reassign-clients:
+    post:
+      tags: [CRM]
+      summary: "Reassign all of a person's clients before deactivating them (Flow 2)"
+      description: >
+        Both brokers are notified.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toBrokerUserId]
+              properties:
+                toBrokerUserId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: '{ reassigned }'
+
+  /crm/public/document-requests/{token}:
+    get:
+      tags: [CRM]
+      summary: 'Borrower link — what is still needed (no login)'
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: '{ firstName, missing, expiresAt }'
+        '410':
+          description: 'Expired — ask your broker for a new link'
+
+  /crm/public/document-requests/{token}/files:
+    post:
+      tags: [CRM]
+      summary: 'Borrower upload through the link (no login)'
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+        - {
+            name: type,
+            in: query,
+            required: true,
+            schema:
+              {
+                type: string,
+                enum:
+                  [
+                    ID,
+                    T4,
+                    NOA,
+                    PAY_STUB,
+                    EMPLOYMENT_LETTER,
+                    BANK_STATEMENT,
+                    PURCHASE_AGREEMENT,
+                    MORTGAGE_STATEMENT,
+                    PROPERTY_TAX,
+                    OTHER,
+                  ],
+              },
+          }
+        - { name: fileName, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          '*/*':
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: 'Received'
+        '410':
+          description: 'Expired'
+        '422':
+          description: 'Failed the virus check'
+
+  /crm/public/bookings/{slug}:
+    post:
+      tags: [CRM]
+      summary: 'Public booking page intake (Flow 4.8, no login)'
+      description: >
+        Same bookingRef twice → ignored. Email matches an existing person → appointment attached to them; otherwise a new lead for the page's default broker.
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingRef, name, email, startTime, endTime]
+              properties:
+                bookingRef: { type: string }
+                name: { type: string }
+                email: { type: string, format: email }
+                phone: { type: string }
+                title: { type: string }
+                startTime: { type: string, format: date-time }
+                endTime: { type: string, format: date-time }
+      responses:
+        '201':
+          description: 'Booked'
+        '200':
+          description: 'Duplicate — ignored'
+        '404':
+          description: 'No such (enabled) booking page'
+
+  /crm/internal/tenants/{tenantId}/profile-status:
+    get:
+      summary: 'Is the brokerage profile complete? (modules/auth Tenant Admin gate, Flow 0)'
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: '{ complete }'
+          content:
+            application/json:
+              example: { success: true, data: { complete: false } }
 
   /crm/internal/brokers/{userId}/lead-count:
     get:

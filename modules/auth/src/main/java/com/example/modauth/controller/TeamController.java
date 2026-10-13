@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.UUID;
 
 /** Implements the "Manage teams" flow diagram. Tenant Admin only — enforced in TeamServiceImpl. */
-@Tag(name = "Teams", description = "Tenant Admin: create/list/manage teams of Brokers under a Team Lead")
+@Tag(name = "Teams", description = "Tenant Admin: create/list/manage teams of Brokers and Assistants under a Team Lead — a Tenant Admin gets 403 until the brokerage profile is complete (CRM PATCH /api/v1/crm/tenant/profile)")
 @RestController
 @RequestMapping("/api/v1/modauth/teams")
 @RequiredArgsConstructor

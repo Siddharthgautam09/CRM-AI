@@ -32,7 +32,7 @@ import java.util.UUID;
  * "Accepting an invitation" (preview/accept, public — the caller has no
  * session yet) flow diagrams.
  */
-@Tag(name = "Invitations", description = "Invite a Tenant Admin, Team Lead or Broker; accept an invitation")
+@Tag(name = "Invitations", description = "Invite a Tenant Admin, Team Lead, Broker or Assistant; accept an invitation — a Tenant Admin gets 403 until the brokerage profile is complete (CRM PATCH /api/v1/crm/tenant/profile)")
 @RestController
 @RequestMapping("/api/v1/modauth/invitations")
 @RequiredArgsConstructor

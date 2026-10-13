@@ -44,6 +44,18 @@ export const ownerAcceptedWebhookSchema = z.object({
   params: z.object({}).optional(),
 });
 
+export const authEventWebhookSchema = z.object({
+  body: z.object({
+    action: z.string().regex(/^(auth|security)\.[a-z_.]+$/),
+    tenantId: z.string().uuid().nullable().optional(),
+    userId: z.string().uuid().nullable().optional(),
+    ip: z.string().max(100).nullable().optional(),
+    details: z.string().max(1000).nullable().optional(),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});
+
 export const simulateUsageSchema = z.object({
   body: z.object({ deltaUsdCents: z.coerce.number().int() }),
   query: z.object({}).optional(),

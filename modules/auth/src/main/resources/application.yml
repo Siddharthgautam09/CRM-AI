@@ -113,6 +113,13 @@ modauth:
   # console's "did the owner accept?" state flips from Pending to Active.
   # Blank/unset is fine — modules/platform isn't a hard dependency of this one.
   platform-webhook-url: ${PLATFORM_WEBHOOK_URL:}
+  # Sign-in and security events forwarded to the Super Admin's activity log
+  # (Flow 1). Blank = not forwarded — see PlatformEventClient.
+  platform-events-url: ${PLATFORM_EVENTS_URL:}
+  # Flow 0 "inactive too long → logged out": a refresh token older than this
+  # is refused — see SessionPolicyRefreshTokenService.
+  session:
+    idle-timeout-minutes: ${SESSION_IDLE_TIMEOUT_MINUTES:30}
   # Same Node app, different route group — PeopleServiceImpl's deactivation
   # check (SOW 2.11) asks modules/crm "does this broker still have clients
   # assigned?" before allowing deactivation.

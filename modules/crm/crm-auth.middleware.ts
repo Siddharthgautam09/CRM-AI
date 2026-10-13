@@ -1,7 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 
-import { getModAuthPerson, type ModAuthRole } from './modauth.client';
+import { getModAuthPerson, resolveTeam, type ModAuthRole } from './modauth.client';
+import { isProfileComplete } from './tenant.service';
 import { ApiError } from '../../utils/api-error';
 import { asyncHandler } from '../../utils/async-handler';
 import { extractBearerToken, verifyAuthToken } from '../platform/auth-jwt.middleware';
@@ -39,6 +40,12 @@ export function requireModAuthRole(...allowedRoles: ModAuthRole[]) {
     if (!person.active) {
       throw new ApiError('Account deactivated. Contact your admin.', StatusCodes.FORBIDDEN);
     }
+    if (person.tenantSuspended) {
+      throw new ApiError(
+        "Your brokerage's access is suspended. Contact your administrator.",
+        StatusCodes.FORBIDDEN,
+      );
+    }
     if (!allowedRoles.includes(person.role)) {
       throw new ApiError(`${person.role} cannot access this`, StatusCodes.FORBIDDEN);
     }
@@ -47,3 +54,44 @@ export function requireModAuthRole(...allowedRoles: ModAuthRole[]) {
     next();
   });
 }
+
+/**
+ * Which leads a single-person route (open, edit, delete, documents, AI…) may
+ * touch. Flow 3: a Team Lead has "the same access as the owning broker" to
+ * every person on their team; everyone else is scoped like their book.
+ */
+export async function leadAccessIds(user: CrmUser): Promise<string[]> {
+  if (user.role === 'TEAM_LEAD' && user.teamId) {
+    return (await resolveTeam(user.teamId, user.bearerToken)).brokerIds;
+  }
+  return bookBrokerIds(user);
+}
+
+/**
+ * Whose leads an own-book route works on: the caller's own for a Broker/Team
+ * Lead; for an Assistant (SOW 2.5 — no book of their own) every lead on
+ * their team. Routes decide what an Assistant may do (view/edit, never
+ * create/delete/reveal); this only decides which records.
+ */
+export async function bookBrokerIds(user: CrmUser): Promise<string[]> {
+  if (user.role !== 'ASSISTANT') return [user.userId];
+  if (!user.teamId) {
+    throw new ApiError('You are not assigned to a team', StatusCodes.FORBIDDEN);
+  }
+  return (await resolveTeam(user.teamId, user.bearerToken)).brokerIds;
+}
+
+/**
+ * Flow 0 "Tenant Admin → Complete the brokerage profile, required before
+ * anything else". Goes after requireModAuthRole on every Tenant Admin route
+ * except the profile itself; other roles pass straight through.
+ */
+export const requireCompleteBrokerageProfile = asyncHandler(
+  async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    const user = req.crmUser!;
+    if (user.role === 'TENANT_ADMIN' && !(await isProfileComplete(user.tenantId))) {
+      throw new ApiError('Complete the brokerage profile first', StatusCodes.FORBIDDEN);
+    }
+    next();
+  },
+);

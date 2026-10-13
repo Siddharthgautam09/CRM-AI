@@ -15,6 +15,22 @@ export const createLeadSchema = z.object({
     dateOfBirth: z.string().datetime().optional(),
     sin: z.string().min(1).max(50).optional(),
     bankDetails: z.string().min(1).max(1000).optional(),
+    acceptedTasks: z
+      .array(
+        z.object({
+          title: z.string().min(1).max(255),
+          dueDate: z.string().datetime().optional(),
+        }),
+      )
+      .max(20)
+      .optional(),
+    draftEmail: z
+      .object({
+        intent: z.string().max(50).optional(),
+        subject: z.string().min(1).max(255),
+        body: z.string().min(1).max(20000),
+      })
+      .optional(),
   }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),
@@ -81,6 +97,7 @@ export const updateStageSchema = z.object({
   body: z.object({
     stage: z.enum(LEAD_STAGES),
     lostReason: z.string().min(1).max(1000).optional(),
+    lostNote: z.string().max(5000).optional(),
   }),
   query: z.object({}).optional(),
   params: z.object({ id: z.string().uuid() }),
@@ -113,6 +130,7 @@ export const createTaskSchema = z.object({
     title: z.string().min(1).max(255),
     leadId: z.string().uuid().optional(),
     dueDate: z.string().datetime().optional(),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
   }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),
@@ -161,6 +179,7 @@ export const updateBookingSettingsSchema = z.object({
       .optional(),
     enabled: z.boolean().optional(),
     bufferMinutes: z.coerce.number().int().min(0).max(240).optional(),
+    defaultBrokerUserId: z.string().uuid().nullable().optional(),
   }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),
@@ -176,4 +195,34 @@ export const internalLeadCountSchema = z.object({
   body: z.object({}).optional(),
   query: z.object({ tenantId: z.string().uuid() }),
   params: z.object({ userId: z.string().uuid() }),
+});
+
+export const reassignAllSchema = z.object({
+  body: z.object({ toBrokerUserId: z.string().uuid() }),
+  query: z.object({}).optional(),
+  params: z.object({ userId: z.string().uuid() }),
+});
+
+export const deleteLeadSchema = z.object({
+  body: z.object({ confirmName: z.string().min(1).max(255) }),
+  query: z.object({}).optional(),
+  params: z.object({ id: z.string().uuid() }),
+});
+
+export const linkTaskSchema = z.object({
+  body: z.object({ leadId: z.string().uuid() }),
+  query: z.object({}).optional(),
+  params: z.object({ id: z.string().uuid() }),
+});
+
+export const searchSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({ q: z.string().min(1).max(100) }),
+  params: z.object({}).optional(),
+});
+
+export const internalProfileStatusSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({}).optional(),
+  params: z.object({ tenantId: z.string().uuid() }),
 });

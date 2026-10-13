@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 
 import { requireAuthenticatedClient } from './google-connection.service';
+import { getPrismaClient } from '../../../config/database';
 import { recordActivity } from '../../platform/activity-log';
 
 export interface SendEmailInput {
@@ -8,6 +9,8 @@ export interface SendEmailInput {
   subject: string;
   body: string;
   leadId?: string;
+  // Flow 4.7 — sending a saved draft removes it; if the send fails it's kept.
+  draftId?: string;
 }
 
 function toRawMessage(from: string, input: SendEmailInput): string {
@@ -39,6 +42,12 @@ export async function sendEmail(
     userId: 'me',
     requestBody: { raw: toRawMessage(googleEmail ?? 'me', input) },
   });
+
+  if (input.draftId) {
+    await getPrismaClient().emailDraft.deleteMany({
+      where: { id: input.draftId, tenantId, brokerUserId },
+    });
+  }
 
   await recordActivity('crm.email.sent', {
     actorId: brokerUserId,

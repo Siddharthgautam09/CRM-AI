@@ -79,7 +79,11 @@ describe('createAppointment — "Google Calendar connected?"', () => {
     const result = await createAppointment(TENANT, 'broker-1', input);
 
     expect(result.pushedToGoogle).toBe(false);
-    expect(mockPrisma.appointment.update).not.toHaveBeenCalled();
+    // Counted so the hourly sweep retries it (Flow 4.8 "queued and retried quietly").
+    expect(mockPrisma.appointment.update).toHaveBeenCalledWith({
+      where: { id: 'appt-1' },
+      data: { pushAttempts: { increment: 1 } },
+    });
   });
 });
 

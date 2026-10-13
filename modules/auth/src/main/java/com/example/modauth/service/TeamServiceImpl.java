@@ -74,14 +74,18 @@ public class TeamServiceImpl implements TeamService {
      * Team Lead can also fetch their own team's roster — modules/platform's
      * CRM module needs this (forwarding the caller's own JWT) to resolve
      * "who's on my team" for the Team Lead flow, without a second internal
-     * service-to-service endpoint duplicating this same query.
+     * service-to-service endpoint duplicating this same query. An Assistant
+     * on the team can fetch it too (SOW 2.5): they work the whole team's book.
      */
     @Override
     public TeamResponse get(AuthenticatedUser caller, UUID teamId) {
         TeamEntity team = requireOwnedTeam(caller.getTenantId(), teamId);
         Role role = roleResolver.resolve(caller);
         boolean isThisTeamsLead = role == Role.TEAM_LEAD && caller.getUserId().equals(team.getTeamLeadUserId());
-        if (role != Role.TENANT_ADMIN && !isThisTeamsLead) {
+        boolean isThisTeamsAssistant = role == Role.ASSISTANT && roleRepo.findById(caller.getUserId())
+                .map(r -> teamId.equals(r.getTeamId()))
+                .orElse(false);
+        if (role != Role.TENANT_ADMIN && !isThisTeamsLead && !isThisTeamsAssistant) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this team");
         }
         return toResponse(team);

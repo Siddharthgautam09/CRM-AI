@@ -113,6 +113,8 @@ services:
       SUPER_ADMIN_EMAIL: superadmin@example.com
       SUPER_ADMIN_PASSWORD: SuperAdmin@12345
       PLATFORM_WEBHOOK_URL: http://app:3000/api/v1/platform/webhooks/owner-accepted
+      PLATFORM_EVENTS_URL: http://app:3000/api/v1/platform/webhooks/auth-events
+      SESSION_IDLE_TIMEOUT_MINUTES: 30
       CRM_BASE_URL: http://app:3000/api/v1/crm
     depends_on:
       auth-postgres:

@@ -3,9 +3,11 @@ package com.example.modauth.dto;
 import com.example.authsvc.common.validation.PasswordConfirmationRequest;
 import com.example.authsvc.common.validation.PasswordsMatch;
 import com.example.authsvc.common.validation.ValidPassword;
+import com.example.modauth.service.PasswordPolicy;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 /**
  * Mirrors gen-auth-starter's own {@code MagicLinkVerifyRequest} shape
@@ -20,7 +22,9 @@ public record AcceptInvitationRequest(
         @Schema(description = "The raw token from the invitation email", requiredMode = Schema.RequiredMode.REQUIRED)
         String token,
 
+        // SOW 1.4 — the starter's @ValidPassword only requires 8.
         @ValidPassword
+        @Size(min = PasswordPolicy.MIN_LENGTH, message = PasswordPolicy.TOO_SHORT_MESSAGE)
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
         String newPassword,
 

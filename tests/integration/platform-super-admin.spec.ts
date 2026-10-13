@@ -64,6 +64,7 @@ import {
   listBrokerages,
   suspendBrokerage,
   reactivateBrokerage,
+  recordAuthEvent,
 } from '../../modules/platform/brokerage.service';
 import { allowExtraToday, getUsageStatus } from '../../modules/platform/usage.service';
 // eslint-disable-next-line import/order -- app must load after the mocks above are registered
@@ -215,5 +216,31 @@ describe('Flow 1 — Super Admin console, HTTP layer', () => {
       expect(res.body.data.paused).toBe(false);
       expect(allowExtraToday).toHaveBeenCalledWith(tenantId);
     });
+  });
+});
+
+describe('Flow 1 — sign-in and security events from modules/auth', () => {
+  const event = { action: 'auth.login.success', tenantId: null, userId: null, ip: '1.2.3.4' };
+
+  it('records a forwarded event into the activity log', async () => {
+    const res = await request(app)
+      .post(`${BASE}/webhooks/auth-events`)
+      .set('X-Internal-Secret', process.env.INTERNAL_SERVICE_SECRET ?? '')
+      .send(event);
+    expect(res.status).toBe(204);
+    expect(recordAuthEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'auth.login.success' }),
+    );
+  });
+
+  it('rejects it without the internal secret, and rejects non-auth action names', async () => {
+    const noSecret = await request(app).post(`${BASE}/webhooks/auth-events`).send(event);
+    expect(noSecret.status).toBe(401);
+
+    const badAction = await request(app)
+      .post(`${BASE}/webhooks/auth-events`)
+      .set('X-Internal-Secret', process.env.INTERNAL_SERVICE_SECRET ?? '')
+      .send({ ...event, action: 'platform.brokerage.purged' });
+    expect(badAction.status).toBe(400);
   });
 });

@@ -43,6 +43,9 @@ public class ModAuthUserRoleEntity {
     @Column(name = "name")
     private String name;
 
+    @Column(name = "phone", length = 50)
+    private String phone;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
     private Role role;
