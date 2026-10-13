@@ -22,9 +22,11 @@ public class ModAuthOpenApiConfig {
     private static final String GUIDE = """
             ## Using this API with the CRM
             1. **Sign in**: `POST /api/v1/modauth/login` (Tenant Admin, Team Lead, Broker, Assistant) or
-               `POST /api/v1/auth/super-admin/login`. Run with `AUTH_TOKEN_DELIVERY_MODE=json` to get
-               `accessToken` in the response body (default: `access_token` cookie), then **Authorize**.
-            2. The same token works on the CRM/Platform API (port 3000, Swagger at `/docs`).
+               `POST /api/v1/auth/super-admin/login`. By default the token is set as an `access_token`
+               cookie for localhost — the CRM/Platform Swagger (port 3000, `/docs`) in the same browser
+               then uses it automatically. Run with `AUTH_TOKENDELIVERYMODE=json` to get `accessToken`
+               in the response body instead, then **Authorize**.
+            2. The same token works on the CRM/Platform API.
             3. **Sessions**: access tokens last 15 minutes; refresh with `POST /api/v1/auth/refresh`.
                A refresh more than `SESSION_IDLE_TIMEOUT_MINUTES` (30) after the previous one signs the
                session out (inactivity); every session ends after 7 days. Refresh only on user activity.
