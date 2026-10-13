@@ -226,3 +226,41 @@ export const internalProfileStatusSchema = z.object({
   query: z.object({}).optional(),
   params: z.object({ tenantId: z.string().uuid() }),
 });
+
+// Flow 4 dashboard cards → filtered lists (see dashboard.service.ts links).
+const withinDays = z.coerce.number().int().min(0).max(3650).optional();
+const flag = z
+  .enum(['true', 'false'])
+  .transform((v) => v === 'true')
+  .optional();
+
+export const listClientsSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({
+    renewalWithinDays: withinDays,
+    followUpWithinDays: withinDays,
+    birthdayWithinDays: withinDays,
+    missingDocuments: flag,
+  }),
+  params: z.object({}).optional(),
+});
+
+export const listLeadsSchema = z.object({
+  body: z.object({}).optional(),
+  query: listClientsSchema.shape.query.extend({
+    // Comma-separated stages, or ALL for every stage (default: the active pipeline).
+    stage: z
+      .string()
+      .transform((v) => v.split(','))
+      .pipe(z.array(z.enum([...LEAD_STAGES, 'ALL'])))
+      .optional(),
+    hot: flag,
+  }),
+  params: z.object({}).optional(),
+});
+
+export const listTasksSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({ due: z.enum(['today', 'overdue']).optional() }),
+  params: z.object({}).optional(),
+});

@@ -63,6 +63,7 @@ export async function intakeBooking(slug: string, input: PublicBookingInput) {
         brokerUserId: lead.brokerUserId,
         leadId: lead.id,
         title: input.title ?? `Consultation — ${input.name}`,
+        type: 'CONSULTATION',
         startTime: new Date(input.startTime),
         endTime: new Date(input.endTime),
         externalRef: input.bookingRef,

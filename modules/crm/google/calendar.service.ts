@@ -1,4 +1,4 @@
-import type { Appointment } from '@prisma/client';
+import type { Appointment, AppointmentType } from '@prisma/client';
 import { google } from 'googleapis';
 
 import { getAuthenticatedClientOrNull } from './google-connection.service';
@@ -10,6 +10,8 @@ export interface CreateAppointmentInput {
   startTime: string;
   endTime: string;
   leadId?: string;
+  // Flow 4.8 "New appointment: call · consultation · document review".
+  type?: AppointmentType;
   attendeeEmails?: string[];
 }
 
@@ -30,6 +32,7 @@ export async function createAppointment(
       brokerUserId,
       leadId: input.leadId,
       title: input.title,
+      type: input.type,
       startTime: new Date(input.startTime),
       endTime: new Date(input.endTime),
     },
@@ -66,9 +69,25 @@ export async function pushAppointment(appointment: Appointment, attendeeEmails?:
   }
 }
 
-export async function listMyAppointments(tenantId: string, brokerUserId: string) {
+/** "Calendar"; from/to narrows it — e.g. the dashboard's "today's meetings" card. */
+export async function listMyAppointments(
+  tenantId: string,
+  brokerUserId: string,
+  range: { from?: string; to?: string } = {},
+) {
   return getPrismaClient().appointment.findMany({
-    where: { tenantId, brokerUserId },
+    where: {
+      tenantId,
+      brokerUserId,
+      ...(range.from || range.to
+        ? {
+            startTime: {
+              ...(range.from && { gte: new Date(range.from) }),
+              ...(range.to && { lt: new Date(range.to) }),
+            },
+          }
+        : {}),
+    },
     orderBy: { startTime: 'asc' },
   });
 }

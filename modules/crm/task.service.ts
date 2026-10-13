@@ -1,4 +1,4 @@
-import { getLeadWithAccess } from './lead.service';
+import { getLeadWithAccess, utcStartOfToday } from './lead.service';
 import { getPrismaClient } from '../../config/database';
 import { ApiError } from '../../utils/api-error';
 import { recordActivity } from '../platform/activity-log';
@@ -23,9 +23,22 @@ export async function createTask(tenantId: string, brokerUserId: string, input: 
   });
 }
 
-export async function listMyTasks(tenantId: string, brokerUserId: string) {
+/** Flow 4.9 task list; due=today|overdue are the dashboard's two task cards (real tasks only). */
+export async function listMyTasks(
+  tenantId: string,
+  brokerUserId: string,
+  filter: { due?: 'today' | 'overdue' } = {},
+) {
+  const start = utcStartOfToday();
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  const due =
+    filter.due === 'today'
+      ? { completed: false, suggested: false, dueDate: { gte: start, lt: end } }
+      : filter.due === 'overdue'
+        ? { completed: false, suggested: false, dueDate: { lt: start } }
+        : {};
   return getPrismaClient().task.findMany({
-    where: { tenantId, brokerUserId },
+    where: { tenantId, brokerUserId, ...due },
     orderBy: { dueDate: 'asc' },
   });
 }

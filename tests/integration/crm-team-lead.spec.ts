@@ -430,7 +430,9 @@ describe('Flow 4 core — funding a lead into a client', () => {
       .set('Authorization', `Bearer ${tokenFor(BROKER_A)}`);
     expect(clientsRes.status).toBe(200);
     expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ stage: 'FUNDED' }) }),
+      expect.objectContaining({
+        where: expect.objectContaining({ AND: [{ stage: 'FUNDED' }] }),
+      }),
     );
   });
 

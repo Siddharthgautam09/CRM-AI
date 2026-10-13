@@ -242,18 +242,89 @@ describe('createLead — "New client"', () => {
 });
 
 describe('listMyLeads — "Leads (not funded yet)"', () => {
+  const whereOf = () => mockPrisma.lead.findMany.mock.calls[0][0].where;
+
   it("scopes to the caller's own tenant and broker id, excluding Funded/Lost", async () => {
     mockPrisma.lead.findMany.mockResolvedValue([]);
     await listMyLeads(TENANT, ['me']);
-    expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          tenantId: TENANT,
-          brokerUserId: { in: ['me'] },
-          stage: { notIn: ['FUNDED', 'LOST'] },
-        },
-      }),
+    expect(whereOf()).toEqual({
+      tenantId: TENANT,
+      brokerUserId: { in: ['me'] },
+      AND: [{ stage: { notIn: ['FUNDED', 'LOST'] } }],
+    });
+  });
+});
+
+describe('Flow 4 dashboard cards → filtered lists', () => {
+  const whereOf = () => mockPrisma.lead.findMany.mock.calls[0][0].where;
+  const today = new Date();
+  const dob = (inDays: number) => {
+    const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    d.setUTCDate(d.getUTCDate() + inDays);
+    d.setUTCFullYear(1985);
+    return d;
+  };
+
+  it('stage=X narrows to that stage; ALL lifts the default; hot means Application→Approved', async () => {
+    mockPrisma.lead.findMany.mockResolvedValue([]);
+    await listMyLeads(TENANT, ['me'], { stages: ['UNDERWRITING'] });
+    expect(whereOf().AND).toEqual([{ stage: { in: ['UNDERWRITING'] } }]);
+
+    mockPrisma.lead.findMany.mockClear();
+    await listMyLeads(TENANT, ['me'], { stages: ['ALL'], hot: true });
+    expect(whereOf().AND).toEqual([{ stage: { in: ['APPLICATION', 'UNDERWRITING', 'APPROVED'] } }]);
+  });
+
+  it('renewals and follow-ups become relation filters', async () => {
+    mockPrisma.lead.findMany.mockResolvedValue([]);
+    await listMyClients(TENANT, ['me'], { renewalWithinDays: 180, followUpWithinDays: 7 });
+    const and = whereOf().AND;
+    expect(and[0]).toEqual({ stage: 'FUNDED' });
+    expect(and[1].mortgages.some.maturityDate.lte.getTime()).toBeGreaterThan(
+      Date.now() + 179 * 86400000,
     );
+    expect(and[2].followUps.some.scheduledAt.lt).toBeInstanceOf(Date);
+    expect(mockPrisma.lead.findMany.mock.calls[0][0].include).toEqual({
+      mortgages: true,
+      documents: false,
+    });
+  });
+
+  it('birthdays within N days, and only files still missing a ticked document', async () => {
+    mockPrisma.lead.findMany.mockResolvedValue([
+      {
+        id: 'soon',
+        dateOfBirth: dob(3),
+        requiredDocuments: ['T4'],
+        documents: [],
+        sin: null,
+        bankDetails: null,
+      },
+      {
+        id: 'later',
+        dateOfBirth: dob(20),
+        requiredDocuments: ['T4'],
+        documents: [],
+        sin: null,
+        bankDetails: null,
+      },
+      {
+        id: 'complete',
+        dateOfBirth: dob(1),
+        requiredDocuments: ['T4'],
+        documents: [{ type: 'T4' }],
+        sin: null,
+        bankDetails: null,
+      },
+    ]);
+    const result = await listMyLeads(TENANT, ['me'], {
+      stages: ['ALL'],
+      birthdayWithinDays: 7,
+      missingDocuments: true,
+    });
+    expect(result.map((l) => l.id)).toEqual(['soon']);
+    // Only fetched for the check — never sent to the client.
+    expect(JSON.parse(JSON.stringify(result[0]))).not.toHaveProperty('documents');
   });
 });
 
@@ -263,8 +334,8 @@ describe('listMyClients — "Clients (funded)"', () => {
     await listMyClients(TENANT, ['me']);
     expect(mockPrisma.lead.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { tenantId: TENANT, brokerUserId: { in: ['me'] }, stage: 'FUNDED' },
-        include: { mortgages: true },
+        where: { tenantId: TENANT, brokerUserId: { in: ['me'] }, AND: [{ stage: 'FUNDED' }] },
+        include: { mortgages: true, documents: false },
       }),
     );
   });

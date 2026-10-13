@@ -1,13 +1,19 @@
 import { missingDocuments } from './document-processing';
-import { maskLead, pipelineCounts } from './lead.service';
+import {
+  daysUntilBirthday,
+  followUpCutoff,
+  HOT_STAGES,
+  maskLead,
+  pipelineCounts,
+  utcStartOfToday,
+} from './lead.service';
 import { getPrismaClient } from '../../config/database';
 
 const DAY = 24 * 60 * 60 * 1000;
 
 function utcToday() {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  return { now, start, end: new Date(start.getTime() + DAY) };
+  const start = utcStartOfToday();
+  return { now: new Date(), start, end: new Date(start.getTime() + DAY) };
 }
 
 /** "Files missing documents" — leads whose ticked checklist isn't fully received. */
@@ -36,13 +42,6 @@ export async function leadsMissingDocuments(tenantId: string, brokerIds: string[
     .filter((l) => l.missing.length > 0);
 }
 
-/** Days until this date-of-birth's next anniversary (0 = today), in UTC. */
-function daysUntilBirthday(dob: Date, today: Date) {
-  const next = new Date(Date.UTC(today.getUTCFullYear(), dob.getUTCMonth(), dob.getUTCDate()));
-  if (next < today) next.setUTCFullYear(next.getUTCFullYear() + 1);
-  return Math.round((next.getTime() - today.getTime()) / DAY);
-}
-
 /**
  * Flow 4 "Broker dashboard" — every card is clickable, so each list carries
  * lead ids for the person panel. AI suggestions and refinance opportunities
@@ -66,7 +65,7 @@ export async function brokerDashboard(tenantId: string, brokerIds: string[]) {
   ] = await Promise.all([
     pipelineCounts(tenantId, brokerIds),
     getPrismaClient().lead.findMany({
-      where: { ...book, stage: { in: ['APPLICATION', 'UNDERWRITING', 'APPROVED'] } },
+      where: { ...book, stage: { in: HOT_STAGES } },
       orderBy: { updatedAt: 'desc' },
       take: 10,
     }),
@@ -86,7 +85,7 @@ export async function brokerDashboard(tenantId: string, brokerIds: string[]) {
       orderBy: { startTime: 'asc' },
     }),
     getPrismaClient().followUp.findMany({
-      where: { lead: book, scheduledAt: { lt: new Date(end.getTime() + 7 * DAY) } },
+      where: { lead: book, scheduledAt: { lt: followUpCutoff(7, start) } },
       include: { lead: { select: { id: true, name: true } } },
       orderBy: { scheduledAt: 'asc' },
       take: 20,
@@ -132,6 +131,23 @@ export async function brokerDashboard(tenantId: string, brokerIds: string[]) {
     birthdays,
     tasks: { dueToday: tasksDueToday, overdue: tasksOverdue },
     missingDocuments: missingDocs,
+    // Flow 4 "Every card is clickable": the filtered list each card opens (relative to the API prefix).
+    links: {
+      hotLeads: '/crm/leads?hot=true',
+      pipeline: Object.fromEntries(
+        ['NEW', 'QUALIFIED', 'APPLICATION', 'UNDERWRITING', 'APPROVED', 'FUNDED', 'LOST'].map(
+          (stage) => [stage, stage === 'FUNDED' ? '/crm/clients' : `/crm/leads?stage=${stage}`],
+        ),
+      ),
+      portfolio: '/crm/clients',
+      renewals: '/crm/clients?renewalWithinDays=180',
+      meetingsToday: `/crm/appointments?from=${start.toISOString()}&to=${end.toISOString()}`,
+      followUps: '/crm/leads?stage=ALL&followUpWithinDays=7',
+      birthdays: '/crm/leads?stage=ALL&birthdayWithinDays=7',
+      tasksDueToday: '/crm/tasks?due=today',
+      tasksOverdue: '/crm/tasks?due=overdue',
+      missingDocuments: '/crm/leads?stage=ALL&missingDocuments=true',
+    },
     aiSuggestions: { stub: true as const, items: [] as { leadId: string; text: string }[] },
     refinanceOpportunities: {
       stub: true as const,

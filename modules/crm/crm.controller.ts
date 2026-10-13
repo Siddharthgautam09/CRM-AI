@@ -36,13 +36,23 @@ export const createLeadHandler = asyncHandler(async (req: Request, res: Response
 
 export const listMyLeadsHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
-  const leads = await leadService.listMyLeads(user.tenantId, await bookBrokerIds(user));
+  const { stage, ...filter } = req.query as leadService.LeadListFilter & {
+    stage?: leadService.LeadListFilter['stages'];
+  };
+  const leads = await leadService.listMyLeads(user.tenantId, await bookBrokerIds(user), {
+    ...filter,
+    stages: stage,
+  });
   res.status(StatusCodes.OK).json({ success: true, data: leads });
 });
 
 export const listMyClientsHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
-  const clients = await leadService.listMyClients(user.tenantId, await bookBrokerIds(user));
+  const clients = await leadService.listMyClients(
+    user.tenantId,
+    await bookBrokerIds(user),
+    req.query,
+  );
   res.status(StatusCodes.OK).json({ success: true, data: clients });
 });
 
@@ -179,7 +189,7 @@ export const createTaskHandler = asyncHandler(async (req: Request, res: Response
 
 export const listMyTasksHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
-  const tasks = await taskService.listMyTasks(user.tenantId, user.userId);
+  const tasks = await taskService.listMyTasks(user.tenantId, user.userId, req.query);
   res.status(StatusCodes.OK).json({ success: true, data: tasks });
 });
 

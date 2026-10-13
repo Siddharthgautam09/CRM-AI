@@ -426,7 +426,45 @@ paths:
     get:
       tags: [CRM]
       summary: "My leads — not yet funded and not lost (an Assistant sees their whole team's)"
+      description: >
+        Every broker-dashboard card opens one of these filtered lists — the
+        dashboard response's links give the exact URL for each card.
       security: [{ crmBearer: [] }]
+      parameters:
+        - name: stage
+          in: query
+          description: 'Comma-separated stages (e.g. UNDERWRITING,APPROVED), or ALL for every stage. Default: the active pipeline.'
+          schema: { type: string, example: UNDERWRITING }
+        - {
+            name: hot,
+            in: query,
+            schema: { type: boolean },
+            description: 'Hot leads: Application, Underwriting or Approved',
+          }
+        - {
+            name: renewalWithinDays,
+            in: query,
+            schema: { type: integer, minimum: 0 },
+            description: 'Has a mortgage maturing within N days (renewals card: 180)',
+          }
+        - {
+            name: followUpWithinDays,
+            in: query,
+            schema: { type: integer, minimum: 0 },
+            description: 'Has a follow-up due within N days, overdue included (follow-ups card: 7)',
+          }
+        - {
+            name: birthdayWithinDays,
+            in: query,
+            schema: { type: integer, minimum: 0 },
+            description: 'Birthday within the next N days (birthdays card: 7)',
+          }
+        - {
+            name: missingDocuments,
+            in: query,
+            schema: { type: boolean },
+            description: 'Still missing a ticked document',
+          }
       responses:
         '200':
           description: The caller's active pipeline
@@ -445,6 +483,31 @@ paths:
       tags: [CRM]
       summary: 'My clients — funded leads, with their mortgage(s)'
       security: [{ crmBearer: [] }]
+      parameters:
+        - {
+            name: renewalWithinDays,
+            in: query,
+            schema: { type: integer, minimum: 0 },
+            description: 'Has a mortgage maturing within N days (renewals card: 180)',
+          }
+        - {
+            name: followUpWithinDays,
+            in: query,
+            schema: { type: integer, minimum: 0 },
+            description: 'Has a follow-up due within N days, overdue included (follow-ups card: 7)',
+          }
+        - {
+            name: birthdayWithinDays,
+            in: query,
+            schema: { type: integer, minimum: 0 },
+            description: 'Birthday within the next N days (birthdays card: 7)',
+          }
+        - {
+            name: missingDocuments,
+            in: query,
+            schema: { type: boolean },
+            description: 'Still missing a ticked document',
+          }
       responses:
         '200':
           description: The caller's funded clients
@@ -1217,6 +1280,11 @@ paths:
       tags: [CRM]
       summary: My own tasks
       security: [{ crmBearer: [] }]
+      parameters:
+        - name: due
+          in: query
+          description: 'today / overdue — open, approved tasks only (the dashboard task cards)'
+          schema: { type: string, enum: [today, overdue] }
       responses:
         '200':
           description: The caller's tasks
@@ -1612,6 +1680,11 @@ paths:
               required: [title, startTime, endTime]
               properties:
                 title: { type: string }
+                type:
+                  type: string
+                  enum: [CALL, CONSULTATION, DOCUMENT_REVIEW]
+                  default: CONSULTATION
+                  description: 'Flow 4.8 — call · consultation · document review'
                 startTime: { type: string, format: date-time }
                 endTime: { type: string, format: date-time }
                 leadId: { type: string, format: uuid }
@@ -1623,6 +1696,19 @@ paths:
       tags: [Google integration]
       summary: My appointments
       security: [{ crmBearer: [] }]
+      parameters:
+        - {
+            name: from,
+            in: query,
+            schema: { type: string, format: date-time },
+            description: 'Starts at or after',
+          }
+        - {
+            name: to,
+            in: query,
+            schema: { type: string, format: date-time },
+            description: 'Starts before',
+          }
       responses:
         '200':
           description: The caller's appointments
@@ -2019,7 +2105,7 @@ paths:
       tags: [CRM]
       summary: 'Broker dashboard (Flow 4)'
       description: >
-        Hot leads, pipeline, portfolio value, renewals, today's meetings, follow-ups, birthdays, tasks due/overdue, missing documents; AI suggestions and refinance opportunities are stubs (empty).
+        Hot leads, pipeline, portfolio value, renewals, today's meetings, follow-ups, birthdays, tasks due/overdue, missing documents; AI suggestions and refinance opportunities are stubs (empty). Every card is clickable — links holds the filtered list URL each card opens (relative to the API prefix), e.g. links.pipeline.UNDERWRITING = /crm/leads?stage=UNDERWRITING.
       security: [{ crmBearer: [] }]
       responses:
         '200':

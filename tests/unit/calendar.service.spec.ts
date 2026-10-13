@@ -136,3 +136,29 @@ describe('requireOwnAppointment', () => {
     });
   });
 });
+
+describe('Flow 4.8 — appointment type and the "today\'s meetings" range', () => {
+  it('stores the chosen type', async () => {
+    mockPrisma.appointment.create.mockResolvedValue({ id: 'a1' });
+    (getAuthenticatedClientOrNull as jest.Mock).mockResolvedValue(null);
+    await createAppointment(TENANT, 'broker-1', {
+      title: 'Go through documents',
+      startTime: '2026-11-01T15:00:00.000Z',
+      endTime: '2026-11-01T15:30:00.000Z',
+      type: 'DOCUMENT_REVIEW',
+    });
+    expect(mockPrisma.appointment.create.mock.calls[0][0].data.type).toBe('DOCUMENT_REVIEW');
+  });
+
+  it('narrows the calendar to a from/to window', async () => {
+    mockPrisma.appointment.findMany.mockResolvedValue([]);
+    await listMyAppointments(TENANT, 'broker-1', {
+      from: '2026-11-01T00:00:00.000Z',
+      to: '2026-11-02T00:00:00.000Z',
+    });
+    expect(mockPrisma.appointment.findMany.mock.calls[0][0].where.startTime).toEqual({
+      gte: new Date('2026-11-01T00:00:00.000Z'),
+      lt: new Date('2026-11-02T00:00:00.000Z'),
+    });
+  });
+});

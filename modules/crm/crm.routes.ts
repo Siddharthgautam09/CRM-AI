@@ -91,6 +91,9 @@ import {
   internalProfileStatusSchema,
   leadIdParamSchema,
   linkTaskSchema,
+  listClientsSchema,
+  listLeadsSchema,
+  listTasksSchema,
   reassignAllSchema,
   reassignSchema,
   recalculateAffordabilitySchema,
@@ -132,6 +135,7 @@ import {
 } from './google/google.controller';
 import {
   createAppointmentSchema,
+  listAppointmentsSchema,
   oauthCallbackSchema,
   sendEmailSchema,
 } from './google/google.validation';
@@ -201,10 +205,16 @@ crmRouter.post(
   validate(createLeadSchema),
   createLeadHandler,
 );
-crmRouter.get('/leads', requireModAuthRole('BROKER', 'TEAM_LEAD', 'ASSISTANT'), listMyLeadsHandler);
+crmRouter.get(
+  '/leads',
+  requireModAuthRole('BROKER', 'TEAM_LEAD', 'ASSISTANT'),
+  validate(listLeadsSchema),
+  listMyLeadsHandler,
+);
 crmRouter.get(
   '/clients',
   requireModAuthRole('BROKER', 'TEAM_LEAD', 'ASSISTANT'),
+  validate(listClientsSchema),
   listMyClientsHandler,
 );
 crmRouter.get(
@@ -463,7 +473,12 @@ crmRouter.post(
   validate(createTaskSchema),
   createTaskHandler,
 );
-crmRouter.get('/tasks', requireModAuthRole('BROKER', 'TEAM_LEAD'), listMyTasksHandler);
+crmRouter.get(
+  '/tasks',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(listTasksSchema),
+  listMyTasksHandler,
+);
 crmRouter.patch(
   '/tasks/:id/complete',
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
@@ -617,6 +632,7 @@ crmRouter.post(
 crmRouter.get(
   '/appointments',
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(listAppointmentsSchema),
   listMyAppointmentsHandler,
 );
 
