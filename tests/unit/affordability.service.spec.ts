@@ -14,11 +14,15 @@ import { getLeadWithAccess } from '../../modules/crm/lead.service';
 
 const mockPrisma = {
   lead: { findMany: jest.fn(), update: jest.fn() },
+  applicant: { findMany: jest.fn() },
+  debt: { findMany: jest.fn() },
 };
 
 beforeEach(() => {
   jest.clearAllMocks();
   (getPrismaClient as jest.Mock).mockReturnValue(mockPrisma);
+  mockPrisma.applicant.findMany.mockResolvedValue([]);
+  mockPrisma.debt.findMany.mockResolvedValue([]);
 });
 
 const TENANT = 'tenant-1';
@@ -106,6 +110,63 @@ describe('getAffordability', () => {
     const result = await getAffordability(TENANT, 'lead-1', ['me']);
     expect(getLeadWithAccess).toHaveBeenCalledWith(TENANT, 'lead-1', ['me']);
     expect(result.sufficientData).toBe(true);
+  });
+
+  it('prefers structured intake over the flat fields once any applicant exists', async () => {
+    (getLeadWithAccess as jest.Mock).mockResolvedValue({
+      id: 'lead-1',
+      income: 999999, // flat field — must be ignored once structured data exists
+      monthlyDebts: 999999,
+      downPayment: 50000,
+      propertyValue: 400000,
+    });
+    mockPrisma.applicant.findMany.mockResolvedValue([
+      {
+        noaIncomes: [
+          { taxYear: 2023, totalIncome: 80000 },
+          { taxYear: 2024, totalIncome: 90000 }, // latest year wins
+        ],
+        employments: [],
+      },
+      {
+        noaIncomes: [],
+        employments: [
+          { startDate: new Date('2022-01-01'), baseSalary: 40000 },
+          { startDate: new Date('2024-01-01'), baseSalary: 50000 }, // latest job wins
+        ],
+      },
+    ]);
+    mockPrisma.debt.findMany.mockResolvedValue([{ monthlyPayment: 200 }, { monthlyPayment: 100 }]);
+
+    const result = await getAffordability(TENANT, 'lead-1', ['me']);
+
+    // household income 90000 + 50000 = 140000 (not the flat 999999)
+    // monthlyDebts 200 + 100 = 300 (not the flat 999999)
+    expect(result.sufficientData).toBe(true);
+    const expected = computeAffordability({
+      income: 140000,
+      monthlyDebts: 300,
+      downPayment: 50000,
+      propertyValue: 400000,
+    });
+    expect(result).toEqual(expected);
+  });
+
+  it('a lone applicant with no income source at all is $0 household income, not a fallback to the flat field', async () => {
+    (getLeadWithAccess as jest.Mock).mockResolvedValue({
+      id: 'lead-1',
+      income: 120000,
+      monthlyDebts: 500,
+      downPayment: 0,
+      propertyValue: null,
+    });
+    mockPrisma.applicant.findMany.mockResolvedValue([{ noaIncomes: [], employments: [] }]);
+    mockPrisma.debt.findMany.mockResolvedValue([]);
+
+    const result = await getAffordability(TENANT, 'lead-1', ['me']);
+
+    expect(result.sufficientData).toBe(false);
+    expect(result.missingFields).toContain('income');
   });
 });
 

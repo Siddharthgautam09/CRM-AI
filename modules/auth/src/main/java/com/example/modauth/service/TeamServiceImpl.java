@@ -16,8 +16,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -52,7 +54,7 @@ public class TeamServiceImpl implements TeamService {
         roleRepo.save(lead);
 
         for (UUID brokerUserId : request.brokerUserIdsOrEmpty()) {
-            ModAuthUserRoleEntity broker = requireMemberOfRole(tenantId, brokerUserId, Role.BROKER);
+            ModAuthUserRoleEntity broker = requireMemberOfRole(tenantId, brokerUserId, Role.BROKER, Role.ASSISTANT);
             broker.setTeamId(team.getId());
             roleRepo.save(broker);
         }
@@ -91,7 +93,7 @@ public class TeamServiceImpl implements TeamService {
         roleResolver.requireTenantAdmin(admin);
         TeamEntity team = requireOwnedTeam(admin.getTenantId(), teamId);
 
-        ModAuthUserRoleEntity broker = requireMemberOfRole(admin.getTenantId(), brokerUserId, Role.BROKER);
+        ModAuthUserRoleEntity broker = requireMemberOfRole(admin.getTenantId(), brokerUserId, Role.BROKER, Role.ASSISTANT);
         broker.setTeamId(team.getId());
         roleRepo.save(broker);
 
@@ -143,14 +145,16 @@ public class TeamServiceImpl implements TeamService {
         return team;
     }
 
-    private ModAuthUserRoleEntity requireMemberOfRole(UUID tenantId, UUID userId, Role expectedRole) {
+    private ModAuthUserRoleEntity requireMemberOfRole(UUID tenantId, UUID userId, Role... expectedRoles) {
         ModAuthUserRoleEntity row = roleRepo.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "No such person"));
         if (!row.getTenantId().equals(tenantId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not your brokerage's person");
         }
-        if (row.getRole() != expectedRole) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Expected a " + expectedRole + " but this person is a " + row.getRole());
+        if (!List.of(expectedRoles).contains(row.getRole())) {
+            String expected = Arrays.stream(expectedRoles).map(Role::name).collect(Collectors.joining(" or "));
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Expected a " + expected + " but this person is a " + row.getRole());
         }
         return row;
     }

@@ -244,6 +244,21 @@ export async function openLeadCountByBroker(
   return counts;
 }
 
+/**
+ * "Do they still have clients assigned?" (Flow 2 / SOW 2.11) — every lead/
+ * client still on this broker's book, Lost excluded since a dead deal needs
+ * no reassignment. Called by modauth's internal deactivation check (see
+ * docs/swagger/crm.yaml's internal path), not by any JWT-authenticated route.
+ */
+export async function activeAssignedLeadCount(
+  tenantId: string,
+  brokerUserId: string,
+): Promise<number> {
+  return getPrismaClient().lead.count({
+    where: { tenantId, brokerUserId, stage: { not: 'LOST' } },
+  });
+}
+
 /** Renewals due within 90 days, per broker — the workload view's real figure (see Mortgage.maturityDate). */
 export async function renewalCountByBroker(
   tenantId: string,
@@ -296,6 +311,37 @@ export async function updateTags(
 ) {
   const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
   const updated = await getPrismaClient().lead.update({ where: { id: lead.id }, data: { tags } });
+  return maskLead(updated);
+}
+
+export interface UpdateProfileInput {
+  name?: string;
+  email?: string;
+  phone?: string;
+  city?: string;
+  fileStatus?: 'ACTIVE' | 'INACTIVE';
+  propertyAddress?: string;
+  propertyValue?: number;
+  income?: number;
+  monthlyDebts?: number;
+  downPayment?: number;
+}
+
+/**
+ * "Inline profile edit with Save and Cancel" (SOW 6.9) — one call for the
+ * header/profile-tab fields that don't already have their own dedicated
+ * endpoint (notes, tags, stage and the sensitive fields are all edited
+ * elsewhere, deliberately not folded in here). "Cancel" is just not
+ * calling this — there's nothing to undo server-side.
+ */
+export async function updateLeadProfile(
+  tenantId: string,
+  leadId: string,
+  allowedBrokerIds: string[],
+  input: UpdateProfileInput,
+) {
+  const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
+  const updated = await getPrismaClient().lead.update({ where: { id: lead.id }, data: input });
   return maskLead(updated);
 }
 

@@ -1,5 +1,19 @@
 import { Router } from 'express';
 
+import {
+  contactCategoryCountsHandler,
+  createContactHandler,
+  deleteContactHandler,
+  listMyContactsHandler,
+  teamContactsHandler,
+  updateContactHandler,
+} from './contacts.controller';
+import {
+  contactIdParamSchema,
+  createContactSchema,
+  listContactsSchema,
+  updateContactSchema,
+} from './contacts.validation';
 import { requireModAuthRole } from './crm-auth.middleware';
 import {
   addMortgageHandler,
@@ -10,6 +24,7 @@ import {
   getAffordabilityHandler,
   getMyLeadHandler,
   getPersonPanelHandler,
+  internalLeadCountHandler,
   listMyClientsHandler,
   listMyLeadsHandler,
   listMyTasksHandler,
@@ -23,6 +38,7 @@ import {
   teamCalendarHandler,
   teamDashboardHandler,
   teamTasksHandler,
+  updateLeadProfileHandler,
   updateMyLeadStageHandler,
   updateNotesHandler,
   updateTagsHandler,
@@ -33,6 +49,7 @@ import {
   createTaskSchema,
   exportJobIdParamSchema,
   fundLeadSchema,
+  internalLeadCountSchema,
   leadIdParamSchema,
   reassignSchema,
   recalculateAffordabilitySchema,
@@ -40,6 +57,7 @@ import {
   revealFieldSchema,
   taskIdParamSchema,
   updateBookingSettingsSchema,
+  updateLeadProfileSchema,
   updateNotesSchema,
   updateProfileSchema,
   updateStageSchema,
@@ -59,6 +77,42 @@ import {
   oauthCallbackSchema,
   sendEmailSchema,
 } from './google/google.validation';
+import {
+  addApplicantHandler,
+  addDebtHandler,
+  addEmploymentHandler,
+  addFollowUpHandler,
+  addFundsSourceHandler,
+  addNoaIncomeHandler,
+  addPropertyRecordHandler,
+  getIntakeBundleHandler,
+  removeApplicantHandler,
+  removeDebtHandler,
+  removeFollowUpHandler,
+  removeFundsSourceHandler,
+  removePropertyRecordHandler,
+  updateApplicantHandler,
+  updateDebtHandler,
+  updatePropertyRecordHandler,
+} from './intake.controller';
+import {
+  addApplicantSchema,
+  addDebtSchema,
+  addEmploymentSchema,
+  addFollowUpSchema,
+  addFundsSourceSchema,
+  addNoaIncomeSchema,
+  addPropertyRecordSchema,
+  applicantIdParamSchema,
+  debtIdParamSchema,
+  followUpIdParamSchema,
+  fundsSourceIdParamSchema,
+  intakeBundleParamSchema,
+  propertyIdParamSchema,
+  updateApplicantSchema,
+  updateDebtSchema,
+  updatePropertyRecordSchema,
+} from './intake.validation';
 import { exportReportHandler, getReportHandler } from './reports.controller';
 import {
   downloadSelfServiceExportHandler,
@@ -71,6 +125,7 @@ import {
   updateProfileHandler,
 } from './tenant.controller';
 import { validate } from '../../middlewares/validate.middleware';
+import { requireInternalSecret } from '../platform/internal-secret.middleware';
 
 // Full OpenAPI docs live in docs/swagger/crm.yaml — see config/swagger.ts's apis list.
 const crmRouter = Router();
@@ -110,6 +165,104 @@ crmRouter.post(
   addMortgageHandler,
 );
 
+// Structured intake (SOW Module 5) — own book.
+crmRouter.get(
+  '/leads/:id/intake',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(intakeBundleParamSchema),
+  getIntakeBundleHandler,
+);
+crmRouter.post(
+  '/leads/:id/applicants',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addApplicantSchema),
+  addApplicantHandler,
+);
+crmRouter.patch(
+  '/leads/:id/applicants/:applicantId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateApplicantSchema),
+  updateApplicantHandler,
+);
+crmRouter.delete(
+  '/leads/:id/applicants/:applicantId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(applicantIdParamSchema),
+  removeApplicantHandler,
+);
+crmRouter.post(
+  '/leads/:id/applicants/:applicantId/employment',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addEmploymentSchema),
+  addEmploymentHandler,
+);
+crmRouter.post(
+  '/leads/:id/applicants/:applicantId/noa-income',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addNoaIncomeSchema),
+  addNoaIncomeHandler,
+);
+crmRouter.post(
+  '/leads/:id/debts',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addDebtSchema),
+  addDebtHandler,
+);
+crmRouter.patch(
+  '/leads/:id/debts/:debtId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateDebtSchema),
+  updateDebtHandler,
+);
+crmRouter.delete(
+  '/leads/:id/debts/:debtId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(debtIdParamSchema),
+  removeDebtHandler,
+);
+crmRouter.post(
+  '/leads/:id/properties',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addPropertyRecordSchema),
+  addPropertyRecordHandler,
+);
+crmRouter.patch(
+  '/leads/:id/properties/:propertyId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updatePropertyRecordSchema),
+  updatePropertyRecordHandler,
+);
+crmRouter.delete(
+  '/leads/:id/properties/:propertyId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(propertyIdParamSchema),
+  removePropertyRecordHandler,
+);
+crmRouter.post(
+  '/leads/:id/funds-sources',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addFundsSourceSchema),
+  addFundsSourceHandler,
+);
+crmRouter.delete(
+  '/leads/:id/funds-sources/:fundsSourceId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(fundsSourceIdParamSchema),
+  removeFundsSourceHandler,
+);
+crmRouter.post(
+  '/leads/:id/follow-ups',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(addFollowUpSchema),
+  addFollowUpHandler,
+);
+crmRouter.delete(
+  '/leads/:id/follow-ups/:followUpId',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(followUpIdParamSchema),
+  removeFollowUpHandler,
+);
+
 // Person panel (Flow 4.3) and its tabs — own book.
 crmRouter.get(
   '/leads/:id/panel',
@@ -140,6 +293,12 @@ crmRouter.patch(
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
   validate(updateTagsSchema),
   updateTagsHandler,
+);
+crmRouter.patch(
+  '/leads/:id/profile',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateLeadProfileSchema),
+  updateLeadProfileHandler,
 );
 crmRouter.post(
   '/leads/:id/reveal',
@@ -190,6 +349,7 @@ crmRouter.patch(
 );
 crmRouter.get('/team/tasks', requireModAuthRole('TEAM_LEAD'), teamTasksHandler);
 crmRouter.get('/team/calendar', requireModAuthRole('TEAM_LEAD'), teamCalendarHandler);
+crmRouter.get('/team/contacts', requireModAuthRole('TEAM_LEAD'), teamContactsHandler);
 
 // Reports — shared by Tenant Admin (tenant-wide, or narrowed by team/broker)
 // and Team Lead (always team-scoped). See reports.controller.ts.
@@ -279,6 +439,46 @@ crmRouter.post(
   requireModAuthRole('BROKER', 'TEAM_LEAD'),
   validate(sendEmailSchema),
   sendEmailHandler,
+);
+
+// Contacts / Centres of Influence (SOW Module 14) — own book.
+crmRouter.post(
+  '/contacts',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(createContactSchema),
+  createContactHandler,
+);
+crmRouter.get(
+  '/contacts',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(listContactsSchema),
+  listMyContactsHandler,
+);
+crmRouter.get(
+  '/contacts/category-counts',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  contactCategoryCountsHandler,
+);
+crmRouter.patch(
+  '/contacts/:id',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(updateContactSchema),
+  updateContactHandler,
+);
+crmRouter.delete(
+  '/contacts/:id',
+  requireModAuthRole('BROKER', 'TEAM_LEAD'),
+  validate(contactIdParamSchema),
+  deleteContactHandler,
+);
+
+// Internal, service-to-service (X-Internal-Secret, no JWT) — modauth calls
+// this from PeopleServiceImpl.deactivate() (SOW 2.11).
+crmRouter.get(
+  '/internal/brokers/:userId/lead-count',
+  requireInternalSecret,
+  validate(internalLeadCountSchema),
+  internalLeadCountHandler,
 );
 
 export { crmRouter };

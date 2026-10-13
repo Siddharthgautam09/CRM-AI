@@ -32,6 +32,23 @@ export const updateTagsSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
 });
 
+export const updateLeadProfileSchema = z.object({
+  body: z.object({
+    name: z.string().min(1).max(255).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().max(50).optional(),
+    city: z.string().max(255).optional(),
+    fileStatus: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+    propertyAddress: z.string().max(500).optional(),
+    propertyValue: z.coerce.number().nonnegative().optional(),
+    income: z.coerce.number().nonnegative().optional(),
+    monthlyDebts: z.coerce.number().nonnegative().optional(),
+    downPayment: z.coerce.number().nonnegative().optional(),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({ id: z.string().uuid() }),
+});
+
 export const revealFieldSchema = z.object({
   body: z.object({ field: z.enum(['sin', 'bankDetails', 'dateOfBirth']) }),
   query: z.object({}).optional(),
@@ -153,4 +170,10 @@ export const exportJobIdParamSchema = z.object({
   body: z.object({}).optional(),
   query: z.object({}).optional(),
   params: z.object({ jobId: z.string().uuid() }),
+});
+
+export const internalLeadCountSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({ tenantId: z.string().uuid() }),
+  params: z.object({ userId: z.string().uuid() }),
 });

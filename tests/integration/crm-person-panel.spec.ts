@@ -61,6 +61,8 @@ const LEAD_ID = '55555555-5555-5555-5555-555555555555';
 const mockPrisma = {
   lead: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   mortgage: { findMany: jest.fn() },
+  applicant: { findMany: jest.fn() },
+  debt: { findMany: jest.fn() },
 };
 
 function mockBroker() {
@@ -79,6 +81,8 @@ beforeEach(() => {
   (getPrismaClient as jest.Mock).mockReturnValue(mockPrisma);
   (listActivity as jest.Mock).mockResolvedValue({ items: [], total: 0 });
   mockPrisma.mortgage.findMany.mockResolvedValue([]);
+  mockPrisma.applicant.findMany.mockResolvedValue([]);
+  mockPrisma.debt.findMany.mockResolvedValue([]);
   mockBroker();
 });
 

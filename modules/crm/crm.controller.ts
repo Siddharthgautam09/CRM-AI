@@ -105,6 +105,18 @@ export const updateTagsHandler = asyncHandler(async (req: Request, res: Response
   res.status(StatusCodes.OK).json({ success: true, data: lead });
 });
 
+/** "Inline profile edit" (SOW 6.9) — own book. */
+export const updateLeadProfileHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const lead = await leadService.updateLeadProfile(
+    user.tenantId,
+    req.params.id as string,
+    [user.userId],
+    req.body,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: lead });
+});
+
 export const revealFieldHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
   const revealed = await leadService.revealSensitiveField(
@@ -249,4 +261,15 @@ export const teamCalendarHandler = asyncHandler(async (req: Request, res: Respon
   const team = await requireOwnTeam(req);
   const appointments = await calendarService.listForBrokers(user.tenantId, team.brokerIds);
   res.status(StatusCodes.OK).json({ success: true, data: appointments });
+});
+
+// ── Internal (service-to-service, X-Internal-Secret, no JWT) ────────────────
+
+/** modauth's deactivation check (SOW 2.11) — "do they still have clients assigned?" */
+export const internalLeadCountHandler = asyncHandler(async (req: Request, res: Response) => {
+  const count = await leadService.activeAssignedLeadCount(
+    req.query.tenantId as string,
+    req.params.userId as string,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: { count } });
 });

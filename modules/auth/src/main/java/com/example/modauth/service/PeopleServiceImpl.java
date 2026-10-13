@@ -29,6 +29,7 @@ public class PeopleServiceImpl implements PeopleService {
     private final AuthRefreshTokenJpaRepository refreshTokenRepo;
     private final RoleResolver roleResolver;
     private final PersonMapper personMapper;
+    private final CrmClient crmClient;
 
     @Override
     public List<PersonResponse> list(AuthenticatedUser admin) {
@@ -53,9 +54,14 @@ public class PeopleServiceImpl implements PeopleService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Cannot deactivate a Tenant Admin here");
         }
 
-        // ponytail: "does this broker still have clients assigned?" isn't checkable
-        // yet — no Leads/Clients model exists. Always passes for now; wire a real
-        // check (and a reassignment step) once that model lands.
+        // "Do they still have clients assigned?" (Flow 2 / SOW 2.11) — a
+        // Broker, Assistant or Team Lead can all hold leads directly (Flow
+        // 3's "own book"), so the same check applies to any of them.
+        int assignedCount = crmClient.activeAssignedLeadCount(admin.getTenantId(), userId);
+        if (assignedCount > 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Reassign their " + assignedCount + " clients first");
+        }
 
         AuthUserEntity user = userLookupRepo.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Person not found"));

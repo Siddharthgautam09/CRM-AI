@@ -7,7 +7,7 @@ const internalHeaders = {
   'X-Internal-Secret': env.platform.internalSecret,
 };
 
-export type ModAuthRole = 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TEAM_LEAD' | 'BROKER';
+export type ModAuthRole = 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TEAM_LEAD' | 'BROKER' | 'ASSISTANT';
 
 export interface ModAuthPerson {
   userId: string;

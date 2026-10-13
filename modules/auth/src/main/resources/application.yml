@@ -113,3 +113,7 @@ modauth:
   # console's "did the owner accept?" state flips from Pending to Active.
   # Blank/unset is fine — modules/platform isn't a hard dependency of this one.
   platform-webhook-url: ${PLATFORM_WEBHOOK_URL:}
+  # Same Node app, different route group — PeopleServiceImpl's deactivation
+  # check (SOW 2.11) asks modules/crm "does this broker still have clients
+  # assigned?" before allowing deactivation.
+  crm-base-url: ${CRM_BASE_URL:http://localhost:3000/api/v1/crm}
