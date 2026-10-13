@@ -28,14 +28,16 @@ import { recordActivity } from '../../modules/platform/activity-log';
 import {
   emailAlreadyHasAccount,
   createBrokerageOwnerInvitation,
+  setTenantAccess,
 } from '../../modules/platform/auth-service.client';
 import {
   createBrokerage,
+  purgeCancelledBrokerages,
   reactivateBrokerage,
   startBrokerageCancellation,
   suspendBrokerage,
 } from '../../modules/platform/brokerage.service';
-import { startExport } from '../../modules/platform/export.service';
+import { purgeTenantCrmData, startExport } from '../../modules/platform/export.service';
 import { tenantServiceGaps } from '../../modules/platform/tenant-service.client';
 import { ApiError } from '../../utils/api-error';
 
@@ -152,5 +154,59 @@ describe('startBrokerageCancellation — confirm -> export packaged', () => {
     );
     expect(startExport).toHaveBeenCalledWith(tenant);
     expect(result.exportJob.id).toBe('export-1');
+  });
+});
+
+describe('Flow 1 — suspend/cancel block sign-in; reactivate restores it', () => {
+  it('blocks sign-in before suspending, so a failure never leaves people let in', async () => {
+    const order: string[] = [];
+    (setTenantAccess as jest.Mock).mockImplementation(async () => order.push('block'));
+    mockTenantsService.suspend.mockImplementation(async () => order.push('suspend'));
+
+    await suspendBrokerage('tenant-1', 'unpaid');
+
+    expect(setTenantAccess).toHaveBeenCalledWith('tenant-1', true, 'SUSPENDED');
+    expect(order).toEqual(['block', 'suspend']);
+  });
+
+  it('restores sign-in only after reactivating', async () => {
+    const order: string[] = [];
+    mockTenantsService.reactivate.mockImplementation(async () => order.push('reactivate'));
+    (setTenantAccess as jest.Mock).mockImplementation(async () => order.push('unblock'));
+
+    await reactivateBrokerage('tenant-1');
+
+    expect(setTenantAccess).toHaveBeenCalledWith('tenant-1', false, 'ACTIVE');
+    expect(order).toEqual(['reactivate', 'unblock']);
+  });
+
+  it('cancellation blocks sign-in and starts the retention clock', async () => {
+    (tenantServiceGaps.cancel as jest.Mock).mockResolvedValue({ id: 'tenant-1' });
+    await startBrokerageCancellation('tenant-1');
+    expect(setTenantAccess).toHaveBeenCalledWith('tenant-1', true, 'CANCELLED');
+    expect(mockPrisma.brokerageOnboarding.update).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-1' },
+      data: { cancelledAt: expect.any(Date) },
+    });
+  });
+});
+
+describe('purgeCancelledBrokerages — "permanently deleted after the retention period"', () => {
+  it('purges only brokerages cancelled before the cutoff and not yet purged', async () => {
+    const now = new Date('2026-12-31T00:00:00.000Z');
+    mockPrisma.brokerageOnboarding.findMany.mockResolvedValue([{ tenantId: 'tenant-old' }]);
+
+    const count = await purgeCancelledBrokerages(now);
+
+    const where = mockPrisma.brokerageOnboarding.findMany.mock.calls[0][0].where;
+    expect(where.purgedAt).toBeNull();
+    expect(where.cancelledAt.lt.getTime()).toBe(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    expect(purgeTenantCrmData).toHaveBeenCalledWith('tenant-old');
+    expect(tenantServiceGaps.purge).toHaveBeenCalledWith('tenant-old');
+    expect(mockPrisma.brokerageOnboarding.update).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-old' },
+      data: { purgedAt: now },
+    });
+    expect(count).toBe(1);
   });
 });

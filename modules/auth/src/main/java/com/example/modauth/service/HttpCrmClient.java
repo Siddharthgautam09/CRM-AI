@@ -62,4 +62,29 @@ public class HttpCrmClient implements CrmClient {
                     "Could not check this person's assigned clients — try again");
         }
     }
+
+    /** Fails loud (502) like the lead count — a gate that can be skipped on an outage isn't a gate. */
+    @Override
+    public boolean isBrokerageProfileComplete(UUID tenantId) {
+        URI uri = URI.create(crmBaseUrl + "/internal/tenants/" + tenantId + "/profile-status");
+        HttpRequest request = HttpRequest.newBuilder(uri)
+                .header("X-Internal-Secret", internalServiceSecret)
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build();
+        try {
+            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "Could not check the brokerage profile — try again");
+            }
+            return objectMapper.readTree(response.body()).path("data").path("complete").asBoolean(false);
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("crm.profile_status_check_failed tenantId={}", tenantId, e);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Could not check the brokerage profile — try again");
+        }
+    }
 }

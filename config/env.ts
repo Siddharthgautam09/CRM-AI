@@ -31,6 +31,8 @@ const envSchema = z.object({
   AUTH_JWT_ISSUER: z.string().default('https://auth.example.com'),
   AUTH_JWT_AUDIENCE: z.string().default('example-api'),
   BROKERAGE_EXPORT_DOWNLOAD_DAYS: z.coerce.number().int().min(1).default(7),
+  // Flow 1 "permanently deleted after the retention period" — days after cancellation.
+  BROKERAGE_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
   BROKERAGE_EXPORT_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
 
   // ── modules/platform — usage & AI cost (Gen_USG) ───────────────────────────
@@ -58,6 +60,22 @@ const envSchema = z.object({
   TOKEN_ENCRYPTION_KEY: z
     .string()
     .default('eed03caf5b9fad03e8fb6243a466ed9d2eda77b629fa50899c4eff234b68f8cc'),
+
+  // ── modules/crm — documents, borrower links, reminders (Flow 4.5/4.8) ─────
+  // Where the borrower-facing upload page lives; request links point here.
+  CRM_FRONTEND_URL: z.string().url().default('http://localhost:3000'),
+  // Local-disk document store. shortcut: local disk only, swap for Canadian-region object storage at deploy.
+  DOCUMENT_STORAGE_DIR: z.string().default('storage/documents'),
+  DOCUMENT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(20 * 1024 * 1024),
+  // Off in tests; on in the server so reminders/digest/calendar retries run hourly.
+  CRM_REMINDERS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -95,6 +113,7 @@ export const env = {
     authJwtIssuer: e.AUTH_JWT_ISSUER,
     authJwtAudience: e.AUTH_JWT_AUDIENCE,
     exportDownloadDays: e.BROKERAGE_EXPORT_DOWNLOAD_DAYS,
+    retentionDays: e.BROKERAGE_RETENTION_DAYS,
     exportRetentionDays: e.BROKERAGE_EXPORT_RETENTION_DAYS,
     usageDatabaseUrl: e.USAGE_DATABASE_URL,
     usageRedisUrl: e.USAGE_REDIS_URL,
@@ -106,5 +125,11 @@ export const env = {
     clientSecret: e.GOOGLE_CLIENT_SECRET,
     redirectUri: e.GOOGLE_REDIRECT_URI,
     tokenEncryptionKey: e.TOKEN_ENCRYPTION_KEY,
+  },
+  crm: {
+    frontendUrl: e.CRM_FRONTEND_URL,
+    documentStorageDir: e.DOCUMENT_STORAGE_DIR,
+    documentMaxBytes: e.DOCUMENT_MAX_BYTES,
+    remindersEnabled: e.CRM_REMINDERS_ENABLED,
   },
 } as const;

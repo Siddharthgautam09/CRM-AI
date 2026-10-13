@@ -12,7 +12,10 @@ async function call<T>(path: string, method: string): Promise<T> {
   const res = await fetch(`${baseUrl}${path}`, { method, headers });
   if (!res.ok) {
     const body = await res.text();
-    throw new ApiError(`Tenant service call failed: ${method} ${path} -> ${res.status} ${body}`, 502);
+    throw new ApiError(
+      `Tenant service call failed: ${method} ${path} -> ${res.status} ${body}`,
+      502,
+    );
   }
   return (await res.json()) as T;
 }
@@ -31,7 +34,8 @@ interface TenantPage {
  * gen-sup-starter's TenantsService instead, see brokerage.service.ts.
  */
 export const tenantServiceGaps = {
-  list: (page: number, size: number) => call<TenantPage>(`/api/v1/tenants?page=${page}&size=${size}`, 'GET'),
+  list: (page: number, size: number) =>
+    call<TenantPage>(`/api/v1/tenants?page=${page}&size=${size}`, 'GET'),
   cancel: (id: string) => call<TenantRecord>(`/api/v1/tenants/${id}/cancel`, 'PATCH'),
   purge: (id: string) => call<TenantRecord>(`/api/v1/tenants/${id}/purge`, 'PATCH'),
 };

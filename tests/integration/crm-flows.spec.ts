@@ -1,0 +1,260 @@
+import jwt from 'jsonwebtoken';
+import request from 'supertest';
+
+// Same dev keypair as tests/unit/platform-auth.spec.ts.
+const DEV_PRIVATE_KEY = [
+  '-----BEGIN PRIVATE KEY-----',
+  'MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCuNw6R4lzVmSWo',
+  'Oafb9+sR6l0WM6eEgVGjzlwOoGxUHHue950mwOCDU/whAq0dcsGb+6cbtu5oKpAt',
+  '9IDROQYZF6o+6e3ZoBFB1UKHiIo8eeunZef3wPj6WESxQepH/1TrHLR/ppsHXNjH',
+  'p+P4a/cjnpPyh67Ug1v5L6yrthYQUSpFnOy/L+HiMcWzEXgPh4VQ8Adx8758ZTPQ',
+  'Z+zY2R4i6PFh8bKRH7tD13sFqifUg5pqvq+U+VS0VqF6Ti8Ypl3OnGNyzcqc8f7q',
+  'DKpGztBfEnCXopYFOqBhPt046AlRWNJtiAFFmffPLuTRckSbDSpbtImrNJuup3M3',
+  'fLeMot61AgMBAAECggEAB2Vs/UKNSxWHuhRLN7/XFK6iKb7NqNwjTtSu/IFRDWJx',
+  'g8viucd3K1GAeGz4U9y7CC1Ek0ej6CY5HXUDlwkDD5j9RaiBduYgdW62trGpn2xU',
+  'Vd9csXGu4FSpA0GCJHEG9j2vaA/3BaFVJBImT+CoNbSWIWDN9QBoAjSaRxFMRIBW',
+  'XtgJKlHMo3o51kcOwZzTnkBOeVap32mN/uxKv1dnWWbCsRuBfWBJmlii2PqPuE0G',
+  'E2LGxXeyq9zJLQHB3adl1WuLtVyq/UiLxP98pVdhEiZ+JG+NabHuPWOWZvtUwznn',
+  'QmYsI+9FixyJscUmq3AzRZbLj5+e/9OZWraZzICLQQKBgQDYdRzxdfsQfLJz5HnS',
+  'wPDUE2/qJIcsTTlD/v9duVV2Jts8cK2m5hJaz4QA7gwe5dU/LaKHbvbaMujQ27Ol',
+  'vyQwlE2q59NFTs4LECUL7eY6LmwUW+EMgcrMuVRfe9NcfRYhj8M5LejAHL1zGv1l',
+  'xYFxp9jsnPG9laL7kSxoWcChpQKBgQDOCm2j5+ze5Xa72OBcSDeQelNM9xOEd8nw',
+  'sbM9TKVr2/aDDhO/R+MN9LfXTV/Vc1njWAVa0rLBVOpz/EZr1pYBepZC7t2orAB2',
+  'fBfdNJAJNssTXmkB9hRIoaUDSI94Leh6L18nZ3T4DYZRRDniABDipb5fGFWz6pb9',
+  'lhAZ6oCb0QKBgQDWaArnUkoCJsJM8X+KNvtV1nsAnnYWd9fFdoxUtgPlKM/4qlQY',
+  'AcUklnDWyvTOljIIhpd7N3rk35ClcTodb5vVUtEr/L3U5R5K7w8DJf7qmpkMAYaF',
+  '8PqElv7wJaNS9cQ6MkDaHpNx2AYAQjfF20FA51WD6mG5vMLYFRC7vEuG0QKBgQCc',
+  'upoEIBuyweG7qpGgIN8Da8mJtjiGf4iBKuspKfB7R2sQ7dhfnJM+vnRJtnW7rG8n',
+  '3IDWQYfwQGPHrpLy3Nxma5V5fLHn6E7B0ktk3OLj32ZCaYJ/F2z+gtc+1CcuR92b',
+  'dAVxt+Tl+4O8taVCIMK3ZVSWibBHl58bbtb4n8UMwQKBgGaVKXmhWmNzB0AQW3kj',
+  'qsGZfPiAMtQMqw6t7I7dPBYDh6yASJu0Ds4Npy10v/N+RX3jFqAu5um2LRV2PL7t',
+  'h4kqgePaxacb5bPLWq0+PNVCFz21LMyn/7UZwNiScel/TkuMRsTaErIgs8pg3cHr',
+  'E2WQqOBZt1/TublW03v/qT9U',
+  '-----END PRIVATE KEY-----',
+].join('\n');
+
+function tokenFor(sub: string): string {
+  return jwt.sign({ sub, user_type: 'TENANT_USER' }, DEV_PRIVATE_KEY, {
+    algorithm: 'RS256',
+    issuer: 'https://auth.example.com',
+    audience: 'example-api',
+    expiresIn: '5m',
+  });
+}
+
+jest.mock('../../modules/crm/modauth.client');
+jest.mock('../../modules/crm/document-storage');
+jest.mock('../../modules/platform/activity-log');
+jest.mock('../../modules/platform/usage.service');
+jest.mock('../../config/database');
+
+import { getPrismaClient } from '../../config/database';
+import { storeFile } from '../../modules/crm/document-storage';
+import { getModAuthPerson, resolveTeam } from '../../modules/crm/modauth.client';
+import { getUsageStatus } from '../../modules/platform/usage.service';
+// eslint-disable-next-line import/order -- app must load after the mocks above are registered
+import { app } from '../../app';
+
+const BASE = '/api/v1/crm';
+const TENANT_ID = 'tenant-1';
+const USER_ID = '66666666-6666-6666-6666-666666666666';
+const LEAD_ID = '11111111-1111-1111-1111-111111111111';
+
+const mockPrisma = {
+  tenantProfile: { findUnique: jest.fn() },
+  lead: { findUnique: jest.fn(), update: jest.fn() },
+  leadDocument: { create: jest.fn() },
+  notification: { create: jest.fn() },
+  crmUserSettings: { findUnique: jest.fn() },
+  voiceNote: { create: jest.fn(), update: jest.fn() },
+};
+
+function as(role: string, teamId: string | null = null) {
+  (getModAuthPerson as jest.Mock).mockResolvedValue({
+    userId: USER_ID,
+    tenantId: TENANT_ID,
+    role,
+    teamId,
+    name: 'Someone',
+    active: true,
+  });
+  return { Authorization: `Bearer ${tokenFor(USER_ID)}` };
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  (getPrismaClient as jest.Mock).mockReturnValue(mockPrisma);
+  mockPrisma.lead.findUnique.mockResolvedValue({
+    id: LEAD_ID,
+    tenantId: TENANT_ID,
+    brokerUserId: USER_ID,
+    name: 'Pat Client',
+  });
+  mockPrisma.crmUserSettings.findUnique.mockResolvedValue(null);
+  (getUsageStatus as jest.Mock).mockResolvedValue({ paused: false });
+});
+
+describe('Flow 0 — a Tenant Admin completes the brokerage profile before anything else', () => {
+  it('blocks other Tenant Admin screens until the profile is complete, but not the profile itself', async () => {
+    mockPrisma.tenantProfile.findUnique.mockResolvedValue({ displayName: 'Acme' });
+    const dash = await request(app).get(`${BASE}/tenant/dashboard`).set(as('TENANT_ADMIN'));
+    expect(dash.status).toBe(403);
+    expect(dash.body.message ?? JSON.stringify(dash.body)).toContain(
+      'Complete the brokerage profile',
+    );
+
+    const profile = await request(app).get(`${BASE}/tenant/profile`).set(as('TENANT_ADMIN'));
+    expect(profile.status).toBe(200);
+  });
+});
+
+describe('Flow 4.5 — uploads are the raw request body', () => {
+  it('stores a file sent with its type and name in the query string', async () => {
+    (storeFile as jest.Mock).mockResolvedValue('tenant-1/key');
+    mockPrisma.leadDocument.create.mockImplementation(({ data }) => ({ id: 'doc-1', ...data }));
+
+    const res = await request(app)
+      .post(`${BASE}/leads/${LEAD_ID}/documents?type=T4&fileName=t4.pdf`)
+      .set(as('BROKER'))
+      .set('Content-Type', 'application/pdf')
+      .send(Buffer.from('%PDF-1.4 fake'));
+
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({
+      type: 'T4',
+      fileName: 't4.pdf',
+      mimeType: 'application/pdf',
+    });
+    expect((storeFile as jest.Mock).mock.calls[0][1].toString()).toBe('%PDF-1.4 fake');
+  });
+
+  it('rejects an upload without a document type', async () => {
+    const res = await request(app)
+      .post(`${BASE}/leads/${LEAD_ID}/documents?fileName=t4.pdf`)
+      .set(as('BROKER'))
+      .set('Content-Type', 'application/pdf')
+      .send(Buffer.from('x'));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Flow 4.1 — voice note upload', () => {
+  it('takes raw audio, keeps it, and returns the stub transcript', async () => {
+    mockPrisma.voiceNote.create.mockResolvedValue({
+      id: 'vn-1',
+      tenantId: TENANT_ID,
+      userId: USER_ID,
+    });
+    const res = await request(app)
+      .post(`${BASE}/voice-notes`)
+      .set(as('BROKER'))
+      .set('Content-Type', 'audio/webm')
+      .send(Buffer.from('audio'));
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({ voiceNoteId: 'vn-1', transcribed: true, stub: true });
+  });
+});
+
+describe('Role limits', () => {
+  it('an Assistant cannot delete a person (Flow 4.11)', async () => {
+    const res = await request(app)
+      .delete(`${BASE}/leads/${LEAD_ID}`)
+      .set(as('ASSISTANT', 'team-1'))
+      .send({ confirmName: 'Pat Client' });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('Public routes — no login', () => {
+  it('rejects a malformed borrower link before touching the database', async () => {
+    const res = await request(app).get(`${BASE}/public/document-requests/not-a-token`);
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a booking that ends before it starts', async () => {
+    const res = await request(app).post(`${BASE}/public/bookings/acme`).send({
+      bookingRef: 'x',
+      name: 'Sam',
+      email: 'sam@example.com',
+      startTime: '2026-11-01T15:00:00.000Z',
+      endTime: '2026-11-01T14:00:00.000Z',
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Flow 1 — a suspended brokerage is blocked on every request', () => {
+  it('returns 403 even with a still-valid token', async () => {
+    (getModAuthPerson as jest.Mock).mockResolvedValue({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      role: 'BROKER',
+      teamId: null,
+      name: 'Someone',
+      active: true,
+      tenantSuspended: true,
+    });
+    const res = await request(app)
+      .get(`${BASE}/leads`)
+      .set('Authorization', `Bearer ${tokenFor(USER_ID)}`);
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).toContain('suspended');
+  });
+});
+
+describe("Flow 3 — a Team Lead has the owning broker's access to their team's people", () => {
+  it("edits a teammate's client, and still can't reach another team's", async () => {
+    const TEAMMATE = '77777777-7777-7777-7777-777777777777';
+    (resolveTeam as jest.Mock).mockResolvedValue({
+      members: [],
+      brokerIds: [USER_ID, TEAMMATE],
+    });
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: LEAD_ID,
+      tenantId: TENANT_ID,
+      brokerUserId: TEAMMATE,
+      name: 'Pat Client',
+      sin: null,
+      bankDetails: null,
+    });
+    mockPrisma.lead.update.mockResolvedValue({ id: LEAD_ID, sin: null, bankDetails: null });
+
+    const ok = await request(app)
+      .patch(`${BASE}/leads/${LEAD_ID}/profile`)
+      .set(as('TEAM_LEAD', 'team-1'))
+      .send({ city: 'Toronto' });
+    expect(ok.status).toBe(200);
+
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: LEAD_ID,
+      tenantId: TENANT_ID,
+      brokerUserId: 'someone-on-another-team',
+      name: 'Other',
+    });
+    const blocked = await request(app)
+      .patch(`${BASE}/leads/${LEAD_ID}/profile`)
+      .set(as('TEAM_LEAD', 'team-1'))
+      .send({ city: 'Toronto' });
+    expect(blocked.status).toBe(403);
+  });
+});
+
+describe('Internal endpoints (X-Internal-Secret)', () => {
+  it('reports brokerage-profile completeness to modules/auth', async () => {
+    mockPrisma.tenantProfile.findUnique.mockResolvedValue({
+      displayName: 'Acme',
+      supportEmail: 'a@acme.test',
+      phone: '555',
+    });
+    const res = await request(app)
+      .get(`${BASE}/internal/tenants/${USER_ID}/profile-status`)
+      .set('X-Internal-Secret', process.env.INTERNAL_SERVICE_SECRET ?? '');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ complete: true });
+  });
+
+  it('rejects a call without the secret', async () => {
+    const res = await request(app).get(`${BASE}/internal/tenants/${USER_ID}/profile-status`);
+    expect(res.status).toBe(401);
+  });
+});

@@ -145,7 +145,9 @@ paths:
     patch:
       tags: [Platform]
       summary: Suspend a brokerage
-      description: Everyone in that brokerage is blocked at login until reactivated.
+      description: >
+        Everyone in that brokerage is blocked at login and signed out on their
+        next request (sessions revoked, CRM calls return 403) until reactivated.
       security: [{ superAdminBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -173,6 +175,7 @@ paths:
     patch:
       tags: [Platform]
       summary: Reactivate a suspended brokerage
+      description: Access restored — people can sign in again.
       security: [{ superAdminBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -199,9 +202,12 @@ paths:
       tags: [Platform]
       summary: Start cancellation
       description: >
-        Marks the tenant CANCELLED in Gen_TNT and kicks off a data export
-        (a downloadable zip). Data stays in the main platform after export;
-        the export itself is permanently deleted after the retention window.
+        Blocks sign-in for everyone in the brokerage, marks the tenant
+        CANCELLED and packages its data: one spreadsheet (CSV) per record type
+        plus every stored document, as a zip available for
+        BROKERAGE_EXPORT_DOWNLOAD_DAYS. After BROKERAGE_RETENTION_DAYS (default
+        90) the brokerage's CRM data and documents are permanently deleted and
+        its tenant record purged — automatically, by the hourly sweep.
       security: [{ superAdminBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -237,9 +243,9 @@ paths:
                 properties:
                   success: { type: boolean }
                   data:
-                    oneOf:
-                      - { $ref: '#/components/schemas/ExportJob' }
-                      - { type: 'null' }
+                    nullable: true
+                    description: null when no export has been started yet
+                    allOf: [{ $ref: '#/components/schemas/ExportJob' }]
 
   /platform/exports/{jobId}/download:
     get:
@@ -331,6 +337,30 @@ paths:
                 properties:
                   success: { type: boolean }
                   data: { $ref: '#/components/schemas/UsageStatus' }
+
+  /platform/webhooks/auth-events:
+    post:
+      summary: modules/auth forwards sign-in and security events here (Flow 1 activity log)
+      description: >
+        Logins, failed logins, lockouts, logouts (including inactivity
+        sign-outs), password changes/resets, refresh-token replay and
+        sign-ins blocked by a suspended brokerage. Each becomes an activity-log
+        entry. action must start with auth. or security.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, example: auth.login.success }
+                tenantId: { type: string, format: uuid, nullable: true }
+                userId: { type: string, format: uuid, nullable: true }
+                ip: { type: string, nullable: true }
+                details: { type: string, nullable: true }
+      responses:
+        '204': { description: Recorded }
 
   /platform/webhooks/owner-accepted:
     post:

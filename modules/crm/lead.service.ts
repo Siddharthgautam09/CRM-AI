@@ -1,4 +1,7 @@
+import { missingDocuments } from './document-processing';
+import { removeStoredFiles } from './document-storage';
 import { decryptToken, encryptToken } from './encryption';
+import { notify } from './notification.service';
 import { getPrismaClient } from '../../config/database';
 import { ApiError } from '../../utils/api-error';
 import { listActivity, recordActivity } from '../platform/activity-log';
@@ -26,6 +29,9 @@ export interface CreateLeadInput {
   dateOfBirth?: string;
   sin?: string;
   bankDetails?: string;
+  // Flow 4.2 "Save" after the AI review — accepted tasks and the draft email.
+  acceptedTasks?: { title: string; dueDate?: string }[];
+  draftEmail?: { intent?: string; subject: string; body: string };
 }
 
 type SensitiveField = 'sin' | 'bankDetails' | 'dateOfBirth';
@@ -39,7 +45,9 @@ type SensitiveField = 'sin' | 'bankDetails' | 'dateOfBirth';
  * the normal read paths — see revealSensitiveField.
  */
 export async function createLead(tenantId: string, brokerUserId: string, input: CreateLeadInput) {
-  const { dateOfBirth, sin, bankDetails, ...rest } = input;
+  const { dateOfBirth, sin, bankDetails, acceptedTasks, draftEmail, ...rest } = input;
+  // One nested create: the lead, the AI review's accepted tasks and its draft email
+  // (Flow 4.2 "Save") are saved together or not at all. Rejected items never arrive.
   return getPrismaClient().lead.create({
     data: {
       tenantId,
@@ -48,6 +56,19 @@ export async function createLead(tenantId: string, brokerUserId: string, input: 
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
       sin: sin ? encryptToken(sin) : undefined,
       bankDetails: bankDetails ? encryptToken(bankDetails) : undefined,
+      tasks: acceptedTasks?.length
+        ? {
+            create: acceptedTasks.map((t) => ({
+              tenantId,
+              brokerUserId,
+              title: t.title,
+              dueDate: t.dueDate ? new Date(t.dueDate) : null,
+            })),
+          }
+        : undefined,
+      emailDrafts: draftEmail
+        ? { create: { tenantId, brokerUserId, ...draftEmail, aiAssisted: true } }
+        : undefined,
     },
   });
 }
@@ -59,18 +80,18 @@ export function maskLead<T extends { sin: string | null; bankDetails: string | n
 }
 
 /** "Leads" — everything not yet funded and not lost (the active pipeline). */
-export async function listMyLeads(tenantId: string, brokerUserId: string) {
+export async function listMyLeads(tenantId: string, brokerIds: string[]) {
   const leads = await getPrismaClient().lead.findMany({
-    where: { tenantId, brokerUserId, stage: { notIn: ['FUNDED', 'LOST'] } },
+    where: { tenantId, brokerUserId: { in: brokerIds }, stage: { notIn: ['FUNDED', 'LOST'] } },
     orderBy: { createdAt: 'desc' },
   });
   return leads.map(maskLead);
 }
 
 /** "Clients" — funded leads, each with their mortgage(s). */
-export async function listMyClients(tenantId: string, brokerUserId: string) {
+export async function listMyClients(tenantId: string, brokerIds: string[]) {
   const clients = await getPrismaClient().lead.findMany({
-    where: { tenantId, brokerUserId, stage: 'FUNDED' },
+    where: { tenantId, brokerUserId: { in: brokerIds }, stage: 'FUNDED' },
     orderBy: { createdAt: 'desc' },
     include: { mortgages: true },
   });
@@ -99,6 +120,7 @@ export async function updateStage(
   allowedBrokerIds: string[],
   stage: LeadStage,
   lostReason?: string,
+  lostNote?: string,
 ) {
   if (stage === 'FUNDED') {
     // "This step cannot be skipped" — Funded only happens through fundLead,
@@ -111,7 +133,11 @@ export async function updateStage(
   }
   const updated = await getPrismaClient().lead.update({
     where: { id: lead.id },
-    data: { stage, lostReason: stage === 'LOST' ? lostReason : null },
+    data: {
+      stage,
+      lostReason: stage === 'LOST' ? lostReason : null,
+      lostNote: stage === 'LOST' ? (lostNote ?? null) : null,
+    },
   });
   return maskLead(updated);
 }
@@ -180,28 +206,117 @@ export async function listForBrokers(tenantId: string, brokerIds: string[]) {
 export async function reassign(
   tenantId: string,
   leadId: string,
-  teamBrokerIds: string[],
+  allowedBrokerIds: string[],
   toBrokerUserId: string,
   actingUserId: string,
 ) {
-  const lead = await getLeadWithAccess(tenantId, leadId, teamBrokerIds);
-  if (!teamBrokerIds.includes(toBrokerUserId)) {
+  const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
+  if (!allowedBrokerIds.includes(toBrokerUserId)) {
     throw new ApiError('That broker is not on this team', 400);
   }
   const updated = await getPrismaClient().lead.update({
     where: { id: lead.id },
     data: { brokerUserId: toBrokerUserId },
   });
-  // ponytail: "both brokers notified" is a notification-system concern this
-  // repo doesn't have yet — the diagram's other half ("it's recorded") is
-  // covered here; wire a real notification once one exists.
-  await recordActivity('crm.lead.reassigned', {
-    actorId: actingUserId,
+  await announceReassignment(tenantId, [lead], lead.brokerUserId, toBrokerUserId, actingUserId);
+  return maskLead(updated);
+}
+
+/**
+ * Flow 2 "Blocked — reassign their 14 clients first → Pick a receiving
+ * broker and reassign": every lead the person holds, in one go. The caller
+ * checks both people are in the brokerage.
+ */
+export async function reassignAll(
+  tenantId: string,
+  fromBrokerUserId: string,
+  toBrokerUserId: string,
+  actingUserId: string,
+) {
+  if (fromBrokerUserId === toBrokerUserId) {
+    throw new ApiError('Pick a different receiving broker', 400);
+  }
+  const leads = await getPrismaClient().lead.findMany({
+    where: { tenantId, brokerUserId: fromBrokerUserId },
+    select: { id: true, name: true },
+  });
+  await getPrismaClient().lead.updateMany({
+    where: { tenantId, brokerUserId: fromBrokerUserId },
+    data: { brokerUserId: toBrokerUserId },
+  });
+  await announceReassignment(tenantId, leads, fromBrokerUserId, toBrokerUserId, actingUserId);
+  return { reassigned: leads.length };
+}
+
+/** Flow 3 "Reassigned — both brokers notified and it's recorded". */
+async function announceReassignment(
+  tenantId: string,
+  leads: { id: string; name: string }[],
+  fromBrokerUserId: string,
+  toBrokerUserId: string,
+  actingUserId: string,
+) {
+  if (leads.length === 0) return;
+  const label = leads.length === 1 ? leads[0]!.name : `${leads.length} clients`;
+  const leadId = leads.length === 1 ? leads[0]!.id : undefined;
+  await Promise.all([
+    notify({
+      tenantId,
+      userId: fromBrokerUserId,
+      type: 'lead.reassigned_away',
+      title: `${label} reassigned to another broker`,
+      leadId,
+    }),
+    notify({
+      tenantId,
+      userId: toBrokerUserId,
+      type: 'lead.reassigned_to_you',
+      title: `${label} reassigned to you`,
+      leadId,
+    }),
+    ...leads.map((l) =>
+      recordActivity('crm.lead.reassigned', {
+        actorId: actingUserId,
+        targetType: 'lead',
+        targetId: l.id,
+        metadata: { fromBrokerUserId, toBrokerUserId },
+      }),
+    ),
+  ]);
+}
+
+/**
+ * Flow 4.11 "Type their name to confirm → Deleted permanently, recorded in
+ * the activity log". Everything about the person goes with them (cascade);
+ * their tasks stay, flagged unlinked (Flow 4.9), and appointments keep their
+ * calendar slot without the link.
+ */
+export async function deleteLead(
+  tenantId: string,
+  leadId: string,
+  allowedBrokerIds: string[],
+  confirmName: string,
+  actorId: string,
+) {
+  const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
+  if (confirmName.trim() !== lead.name.trim()) {
+    throw new ApiError("Type the person's name exactly to confirm", 400);
+  }
+  const documents = await getPrismaClient().leadDocument.findMany({
+    where: { leadId: lead.id },
+    select: { storagePath: true },
+  });
+  await getPrismaClient().$transaction([
+    getPrismaClient().task.updateMany({ where: { leadId: lead.id }, data: { unlinked: true } }),
+    getPrismaClient().lead.delete({ where: { id: lead.id } }),
+  ]);
+  await removeStoredFiles(documents.map((d) => d.storagePath));
+  await recordActivity('crm.lead.deleted', {
+    actorId,
     targetType: 'lead',
     targetId: lead.id,
-    metadata: { fromBrokerUserId: lead.brokerUserId, toBrokerUserId },
+    metadata: { tenantId, name: lead.name },
   });
-  return maskLead(updated);
 }
 
 /** "Team pipeline" — stage counts across every broker on the team. */
@@ -370,18 +485,23 @@ export async function revealSensitiveField(
 
 /**
  * "The person panel... same panel everywhere" — one aggregated read for the
- * Profile/Affordability/Mortgages/Notes/Activity tabs. Documents isn't
- * included yet (no document storage exists in this repo — see Flow 4.5).
+ * Profile/Affordability/Mortgages/Documents/Notes/Activity tabs. AI Tools
+ * has its own endpoints (ai-review.controller.ts).
  */
 export async function getPersonPanel(tenantId: string, leadId: string, allowedBrokerIds: string[]) {
   const lead = await getLeadWithAccess(tenantId, leadId, allowedBrokerIds);
-  const [mortgages, history, recentActivity] = await Promise.all([
+  const [mortgages, history, recentActivity, documents] = await Promise.all([
     getPrismaClient().mortgage.findMany({
       where: { leadId: lead.id },
       orderBy: { createdAt: 'desc' },
     }),
     listActivity({ targetId: lead.id, action: 'crm.notes.updated', size: 100 }),
     listActivity({ targetId: lead.id, size: 50 }),
+    getPrismaClient().leadDocument.findMany({
+      where: { leadId: lead.id },
+      orderBy: { createdAt: 'desc' },
+      omit: { storagePath: true },
+    }),
   ]);
 
   return {
@@ -393,5 +513,10 @@ export async function getPersonPanel(tenantId: string, leadId: string, allowedBr
       history: history.items,
     },
     activity: recentActivity.items,
+    documents: {
+      required: lead.requiredDocuments,
+      items: documents,
+      missing: missingDocuments(lead.requiredDocuments, documents),
+    },
   };
 }

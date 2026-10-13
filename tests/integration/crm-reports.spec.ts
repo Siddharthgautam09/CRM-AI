@@ -61,6 +61,11 @@ const LEAD_USER_ID = '22222222-2222-2222-2222-222222222222';
 const BROKER_A = '33333333-3333-3333-3333-333333333333';
 
 const mockPrisma = {
+  tenantProfile: {
+    findUnique: jest
+      .fn()
+      .mockResolvedValue({ displayName: 'Acme', supportEmail: 'help@acme.test', phone: '555' }),
+  },
   lead: { groupBy: jest.fn() },
   mortgage: { findMany: jest.fn() },
   task: { groupBy: jest.fn() },

@@ -1,3 +1,4 @@
+import { leadsMissingDocuments } from './dashboard.service';
 import { openLeadCountByBroker, renewalCountByBroker } from './lead.service';
 import { overdueCountByBroker } from './task.service';
 
@@ -7,7 +8,7 @@ export interface BrokerWorkload {
   openLeads: number;
   overdueTasks: number;
   renewalsWithin90Days: number;
-  /** ponytail: no Document model exists yet — always 0 until one does. */
+  /** Leads whose ticked document checklist isn't fully received. */
   missingDocuments: number;
 }
 
@@ -22,10 +23,11 @@ export async function teamWorkload(
   members: { userId: string; name: string | null }[],
 ): Promise<BrokerWorkload[]> {
   const brokerIds = members.map((m) => m.userId);
-  const [openLeads, overdueTasks, renewals] = await Promise.all([
+  const [openLeads, overdueTasks, renewals, missingDocs] = await Promise.all([
     openLeadCountByBroker(tenantId, brokerIds),
     overdueCountByBroker(tenantId, brokerIds),
     renewalCountByBroker(tenantId, brokerIds),
+    leadsMissingDocuments(tenantId, brokerIds),
   ]);
   return members.map((m) => ({
     brokerUserId: m.userId,
@@ -33,6 +35,6 @@ export async function teamWorkload(
     openLeads: openLeads[m.userId] ?? 0,
     overdueTasks: overdueTasks[m.userId] ?? 0,
     renewalsWithin90Days: renewals[m.userId] ?? 0,
-    missingDocuments: 0,
+    missingDocuments: missingDocs.filter((l) => l.brokerUserId === m.userId).length,
   }));
 }

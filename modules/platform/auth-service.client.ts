@@ -9,7 +9,10 @@ const headers = {
 
 /** Calls modules/auth's own /internal/auth/users/exists (gen-auth-starter's InternalUserController). */
 export async function emailAlreadyHasAccount(email: string): Promise<boolean> {
-  const res = await fetch(`${baseUrl}/internal/auth/users/exists?email=${encodeURIComponent(email)}`, { headers });
+  const res = await fetch(
+    `${baseUrl}/internal/auth/users/exists?email=${encodeURIComponent(email)}`,
+    { headers },
+  );
   if (!res.ok) {
     throw new ApiError(`Auth service exists-check failed: ${res.status}`, 502);
   }
@@ -47,4 +50,24 @@ export async function createBrokerageOwnerInvitation(
     throw new ApiError(`Auth service invitation create failed: ${res.status} ${body}`, 502);
   }
   return (await res.json()) as InvitationDto;
+}
+
+/**
+ * Flow 1 "Suspend → everyone in that brokerage is blocked at login;
+ * Reactivate → access restored". modules/auth blocks login, token refresh
+ * and the CRM's role lookup, and signs everyone out when blocking.
+ */
+export async function setTenantAccess(
+  tenantId: string,
+  blocked: boolean,
+  status: 'ACTIVE' | 'SUSPENDED' | 'CANCELLED',
+): Promise<void> {
+  const res = await fetch(`${baseUrl}/internal/modauth/tenants/${tenantId}/access`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ blocked, status }),
+  });
+  if (!res.ok) {
+    throw new ApiError(`Auth service tenant access update failed: ${res.status}`, 502);
+  }
 }

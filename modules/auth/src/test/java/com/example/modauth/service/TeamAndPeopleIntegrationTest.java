@@ -139,7 +139,17 @@ class TeamAndPeopleIntegrationTest {
         // No Lead model exists on this Postgres — this test is about the
         // People/Teams round trip, not the cross-service CRM check, which
         // TeamAndPeopleIntegrationTest's Mockito-based siblings already cover.
-        CrmClient noAssignedClients = (tenantId, userId) -> 0;
+        CrmClient noAssignedClients = new CrmClient() {
+            @Override
+            public int activeAssignedLeadCount(UUID tenantId, UUID userId) {
+                return 0;
+            }
+
+            @Override
+            public boolean isBrokerageProfileComplete(UUID tenantId) {
+                return true;
+            }
+        };
         peopleService = new PeopleServiceImpl(roleRepo, userLookupRepo, refreshTokenRepo, roleResolver, personMapper, noAssignedClients);
         admin = new AuthenticatedUser(UUID.randomUUID(), tenantId, "acme", List.of(), UserType.TENANT_USER,
                 "session", null, "jti");

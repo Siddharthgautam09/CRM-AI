@@ -26,11 +26,14 @@ model Document {
 // ACTIVE by the webhook modules/auth calls after a TENANT_ADMIN invite is
 // accepted. See modules/platform/brokerage.service.ts.
 model BrokerageOnboarding {
-  tenantId     String   @id
+  tenantId     String    @id
   invitationId String
-  status       String   @default("PENDING") // PENDING | ACTIVE
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  status       String    @default("PENDING") // PENDING | ACTIVE
+  // Flow 1 cancellation → purge after BROKERAGE_RETENTION_DAYS (purgeCancelledBrokerages).
+  cancelledAt  DateTime?
+  purgedAt     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 // Deliberately simple (a plain table, not the full Gen_Audit hash-chained
@@ -97,7 +100,7 @@ enum FileStatus {
 }
 
 model Lead {
-  id                    String        @id @default(uuid())
+  id                    String                @id @default(uuid())
   tenantId              String
   brokerUserId          String
   name                  String
@@ -105,9 +108,11 @@ model Lead {
   phone                 String?
   // SOW 5.12 — "Client name, city, assignment, tags, and file status."
   city                  String?
-  fileStatus            FileStatus    @default(ACTIVE)
-  stage                 LeadStage     @default(NEW)
+  fileStatus            FileStatus            @default(ACTIVE)
+  stage                 LeadStage             @default(NEW)
   lostReason            String?
+  // Flow 4.6 "Reason is required, note is optional".
+  lostNote              String?
   // "New client" form fields (Flow 4.1) — single-applicant scope, no
   // co-applicant modeling (that's a bigger schema than this CRM core needs).
   income                Float?
@@ -120,7 +125,7 @@ model Lead {
   // recorded on the activity log as their own append-only history.
   notes                 String?
   brokerNotes           String?
-  tags                  String[]      @default([])
+  tags                  String[]              @default([])
   dateOfBirth           DateTime?
   // "Hidden values" (Flow 4.3) — SIN and bank details are encrypted at rest
   // (see modules/crm/encryption.ts) and only ever leave the server through
@@ -130,11 +135,16 @@ model Lead {
   // "Recalculate everyone" (Flow 4.4) cache — the tab itself always
   // recomputes live; this is what a book-wide recalculation writes to.
   affordabilitySnapshot Json?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
   tasks                 Task[]
   mortgages             Mortgage[]
   appointments          Appointment[]
+  emailDrafts           EmailDraft[]
+  // Flow 4.5 "Tick which documents this person needs to send".
+  requiredDocuments     DocumentType[]        @default([])
+  documents             LeadDocument[]
+  documentRequests      DocumentRequestLink[]
   // SOW Module 5's structured intake — additive alongside the flat fields
   // above, which stay as a lightweight fallback (see AffordabilityResult's
   // own comment in affordability.service.ts for how the two combine).
@@ -161,7 +171,7 @@ model Lead {
 model Applicant {
   id          String       @id @default(uuid())
   leadId      String
-  lead        Lead         @relation(fields: [leadId], references: [id])
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
   firstName   String
   lastName    String
   email       String?
@@ -187,7 +197,7 @@ enum EmploymentType {
 model Employment {
   id          String         @id @default(uuid())
   applicantId String
-  applicant   Applicant      @relation(fields: [applicantId], references: [id])
+  applicant   Applicant      @relation(fields: [applicantId], references: [id], onDelete: Cascade)
   type        EmploymentType
   employer    String?
   position    String?
@@ -205,7 +215,7 @@ model Employment {
 model NoaIncome {
   id          String    @id @default(uuid())
   applicantId String
-  applicant   Applicant @relation(fields: [applicantId], references: [id])
+  applicant   Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
   taxYear     Int
   totalIncome Float
   createdAt   DateTime  @default(now())
@@ -218,7 +228,7 @@ model NoaIncome {
 model Debt {
   id             String   @id @default(uuid())
   leadId         String
-  lead           Lead     @relation(fields: [leadId], references: [id])
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   description    String?
   balance        Float
   monthlyPayment Float
@@ -232,7 +242,7 @@ model Debt {
 model PropertyRecord {
   id              String    @id @default(uuid())
   leadId          String
-  lead            Lead      @relation(fields: [leadId], references: [id])
+  lead            Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
   address         String
   propertyTaxes   Float?
   isCondo         Boolean   @default(false)
@@ -250,7 +260,7 @@ model PropertyRecord {
 model FundsSource {
   id          String   @id @default(uuid())
   leadId      String
-  lead        Lead     @relation(fields: [leadId], references: [id])
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   accountType String
   amount      Float
   isGift      Boolean  @default(false)
@@ -265,7 +275,7 @@ model FundsSource {
 model FollowUp {
   id          String   @id @default(uuid())
   leadId      String
-  lead        Lead     @relation(fields: [leadId], references: [id])
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   type        String
   scheduledAt DateTime
   createdAt   DateTime @default(now())
@@ -285,7 +295,7 @@ model Mortgage {
   monthlyPayment Float
   maturityDate   DateTime
   createdAt      DateTime @default(now())
-  lead           Lead     @relation(fields: [leadId], references: [id])
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId])
   @@index([maturityDate])
@@ -305,23 +315,36 @@ model TenantProfile {
 // Booking page setup, settings/config only (per the agreed scope) — no
 // real public scheduling/availability engine behind it yet.
 model BookingPageSettings {
-  tenantId      String   @id
-  slug          String   @unique
-  enabled       Boolean  @default(false)
-  bufferMinutes Int      @default(15)
-  updatedAt     DateTime @updatedAt
+  tenantId            String   @id
+  slug                String   @unique
+  enabled             Boolean  @default(false)
+  bufferMinutes       Int      @default(15)
+  // Who a brand-new lead from the public booking page is assigned to.
+  defaultBrokerUserId String?
+  updatedAt           DateTime @updatedAt
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
 }
 
 model Task {
-  id           String    @id @default(uuid())
+  id           String       @id @default(uuid())
   tenantId     String
   brokerUserId String
   leadId       String?
   title        String
   dueDate      DateTime?
-  completed    Boolean   @default(false)
-  createdAt    DateTime  @default(now())
-  lead         Lead?     @relation(fields: [leadId], references: [id])
+  completed    Boolean      @default(false)
+  // Flow 4.9 — "Suggested by AI": not a real task until approved (dismiss deletes it).
+  suggested    Boolean      @default(false)
+  priority     TaskPriority @default(MEDIUM)
+  // Flow 4.9 "The person was deleted? → shown separately as unlinked".
+  unlinked     Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([brokerUserId])
@@ -354,9 +377,14 @@ model Appointment {
   startTime     DateTime
   endTime       DateTime
   googleEventId String?
+  // Flow 4.8 "Pushed across? No → queued and retried quietly" — see reminder.service.ts.
+  pushAttempts  Int      @default(0)
+  // Flow 4.8 public booking — "Have we seen this booking before?"
+  externalRef   String?
   createdAt     DateTime @default(now())
-  lead          Lead?    @relation(fields: [leadId], references: [id])
+  lead          Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, externalRef])
   @@index([tenantId])
   @@index([brokerUserId])
   @@index([startTime])
@@ -398,4 +426,123 @@ model Contact {
   @@index([tenantId])
   @@index([brokerUserId])
   @@index([category])
+}
+
+// Flow 4.7 — "Save draft, nothing is sent". aiAssisted marks a draft that
+// started from the AI draft ("marked as AI-assisted"). Deleted once sent.
+model EmailDraft {
+  id           String   @id @default(uuid())
+  tenantId     String
+  brokerUserId String
+  leadId       String
+  intent       String?
+  subject      String
+  body         String
+  aiAssisted   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([leadId])
+}
+
+// Flow 4.12 — per-user CRM settings. No row means the defaults (AI on).
+model CrmUserSettings {
+  userId    String   @id
+  tenantId  String
+  aiEnabled Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+// ── Documents (Flow 4.5) ────────────────────────────────────────────────────
+
+enum DocumentType {
+  ID
+  T4
+  NOA
+  PAY_STUB
+  EMPLOYMENT_LETTER
+  BANK_STATEMENT
+  PURCHASE_AGREEMENT
+  MORTGAGE_STATEMENT
+  PROPERTY_TAX
+  OTHER
+}
+
+// "Could the system read it?" — OCR is a stub (client-owned pipeline).
+enum DocumentReadStatus {
+  READ
+  PARTIAL
+  FAILED
+}
+
+model LeadDocument {
+  id          String             @id @default(uuid())
+  tenantId    String
+  leadId      String
+  type        DocumentType
+  fileName    String
+  mimeType    String
+  size        Int
+  storagePath String
+  // BROKER uploaded it themselves; BORROWER came through the request link.
+  uploadedBy  String
+  readStatus  DocumentReadStatus
+  extracted   Json?
+  createdAt   DateTime           @default(now())
+  lead        Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([leadId])
+}
+
+// "Works for that one person only, expires after 7 days."
+model DocumentRequestLink {
+  id        String   @id @default(uuid())
+  tenantId  String
+  leadId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+}
+
+// ── Notifications + reminders ──────────────────────────────────────────────
+
+// In-app notifications ("broker notified", reminders, the 9am digest).
+model Notification {
+  id        String    @id @default(uuid())
+  tenantId  String
+  userId    String
+  type      String
+  title     String
+  body      String?
+  leadId    String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// One row per reminder already sent, so the hourly sweep never repeats one.
+model ReminderLog {
+  key       String   @id
+  createdAt DateTime @default(now())
+}
+
+// Flow 4.1 "Did it transcribe? No → audio is saved, retry, or type the notes".
+model VoiceNote {
+  id          String   @id @default(uuid())
+  tenantId    String
+  userId      String
+  storagePath String
+  mimeType    String
+  size        Int
+  transcript  String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
 }

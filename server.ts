@@ -2,14 +2,21 @@ import { app } from './app';
 import { connectDatabases, disconnectDatabases } from './config/database';
 import { env } from './config/env';
 import { logger } from './config/logger';
+import { runReminderSweep } from './modules/crm/reminder.service';
+import { purgeCancelledBrokerages } from './modules/platform/brokerage.service';
 import { purgeExpiredExports } from './modules/platform/export.service';
 
 let server: ReturnType<typeof app.listen> | null = null;
 let exportPurgeInterval: ReturnType<typeof setInterval> | null = null;
+let reminderInterval: ReturnType<typeof setInterval> | null = null;
 
 const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
   logger.info({ signal }, 'Graceful shutdown started');
 
+  if (reminderInterval) {
+    clearInterval(reminderInterval);
+    reminderInterval = null;
+  }
   if (exportPurgeInterval) {
     clearInterval(exportPurgeInterval);
   }
@@ -50,9 +57,24 @@ const bootstrap = async (): Promise<void> => {
             if (count > 0) logger.info({ count }, 'Purged expired brokerage exports');
           })
           .catch((error: unknown) => logger.error({ error }, 'Brokerage export purge failed'));
+        purgeCancelledBrokerages()
+          .then((count) => {
+            if (count > 0) logger.info({ count }, 'Purged cancelled brokerages past retention');
+          })
+          .catch((error: unknown) => logger.error({ error }, 'Cancelled brokerage purge failed'));
       },
       60 * 60 * 1000,
     );
+
+    // Flow 4.6/4.8 reminders, 9am digest and calendar push retries — see reminder.service.ts.
+    if (env.crm.remindersEnabled) {
+      const sweep = () =>
+        runReminderSweep().catch((error: unknown) =>
+          logger.error({ error }, 'CRM reminder sweep failed'),
+        );
+      void sweep();
+      reminderInterval = setInterval(() => void sweep(), 60 * 60 * 1000);
+    }
 
     process.on('SIGINT', () => {
       void shutdown('SIGINT');

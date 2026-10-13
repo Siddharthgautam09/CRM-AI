@@ -49,6 +49,8 @@ public class ModAuthLoginServiceImpl implements ModAuthLoginService {
     private final LockoutService lockoutService;
     private final PasswordHasher passwordHasher;
     private final LoginExecutionService loginExecutor;
+    private final TenantAccessService tenantAccessService;
+    private final PlatformEventClient platformEvents;
 
     @Autowired(required = false)
     private JavaMailSender mailSender;
@@ -81,7 +83,7 @@ public class ModAuthLoginServiceImpl implements ModAuthLoginService {
                     userOpt.map(AuthUserEntity::getId).orElse(null),
                     email, ipAddress, userAgent, "INVALID_CREDENTIALS");
             log.warn("modauth.login.invalid_credentials email={} ip={}", email, ipAddress);
-            warnIfJustLockedOut(email, ipAddress);
+            warnIfJustLockedOut(email, ipAddress, userOpt.orElse(null));
             throw new InvalidCredentialsException();
         }
 
@@ -91,6 +93,15 @@ public class ModAuthLoginServiceImpl implements ModAuthLoginService {
         if (!user.isActive()) {
             log.info("modauth.login.deactivated userId={}", user.getId());
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account deactivated. Contact your admin.");
+        }
+
+        // ── 3b. Is their brokerage suspended or cancelled? (Flow 1) ─────────
+        if (tenantAccessService.isBlocked(user.getTenantId())) {
+            log.info("modauth.login.tenant_blocked userId={} tenantId={}", user.getId(), user.getTenantId());
+            platformEvents.send("security.login_blocked_suspended_brokerage", user.getTenantId(), user.getId(),
+                    ipAddress, null);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Your brokerage's access is suspended. Contact your administrator.");
         }
 
         lockoutService.clearFailure(email, ipAddress);
@@ -134,11 +145,14 @@ public class ModAuthLoginServiceImpl implements ModAuthLoginService {
      * "still has failures left", without gen-auth-starter needing to
      * expose a new read-only check or change recordFailure's return type.
      */
-    private void warnIfJustLockedOut(String email, String ipAddress) {
+    private void warnIfJustLockedOut(String email, String ipAddress, AuthUserEntity user) {
         try {
             lockoutService.checkLockout(email, ipAddress);
         } catch (AccountLockedException e) {
             sendLockoutWarningEmail(email);
+            platformEvents.send("security.account_locked",
+                    user == null ? null : user.getTenantId(), user == null ? null : user.getId(), ipAddress,
+                    "Locked for 15 minutes after 5 failed attempts");
         }
     }
 

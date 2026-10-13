@@ -53,7 +53,10 @@ export async function allowExtraToday(tenantId: string): Promise<BrokerageUsageS
     create: { tenantId, expiresAt: endOfUtcDay() },
     update: { expiresAt: endOfUtcDay() },
   });
-  await recordActivity('platform.usage.extra_allowed_for_today', { targetType: 'tenant', targetId: tenantId });
+  await recordActivity('platform.usage.extra_allowed_for_today', {
+    targetType: 'tenant',
+    targetId: tenantId,
+  });
   return getUsageStatus(tenantId);
 }
 
@@ -63,7 +66,10 @@ export async function allowExtraToday(tenantId: string): Promise<BrokerageUsageS
  * yet. Kept here rather than skipped, since otherwise the "AI paused" state
  * this module implements can never actually be exercised end to end.
  */
-export async function simulateUsage(tenantId: string, deltaUsdCents: number): Promise<BrokerageUsageStatus> {
+export async function simulateUsage(
+  tenantId: string,
+  deltaUsdCents: number,
+): Promise<BrokerageUsageStatus> {
   const genUsg = await getGenUsg();
   await genUsg.increment({ tenantId, metric: AI_COST_METRIC, delta: deltaUsdCents });
   return getUsageStatus(tenantId);

@@ -15,10 +15,14 @@ export const AI_COST_METRIC = 'ai_cost_daily';
  */
 export const aiCostLimitProvider = {
   async getLimits(tenantId: string): Promise<Record<string, number>> {
-    const override = await getPrismaClient().aiCostLimitOverride.findUnique({ where: { tenantId } });
+    const override = await getPrismaClient().aiCostLimitOverride.findUnique({
+      where: { tenantId },
+    });
     const hasActiveOverride = override !== null && override.expiresAt > new Date();
     return {
-      [AI_COST_METRIC]: hasActiveOverride ? env.platform.aiCostOverrideLimit : env.platform.aiCostDailyLimit,
+      [AI_COST_METRIC]: hasActiveOverride
+        ? env.platform.aiCostOverrideLimit
+        : env.platform.aiCostDailyLimit,
     };
   },
 };

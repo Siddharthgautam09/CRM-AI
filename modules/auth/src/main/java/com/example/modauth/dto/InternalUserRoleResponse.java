@@ -18,6 +18,8 @@ public record InternalUserRoleResponse(
         Role role,
         UUID teamId,
         String name,
-        boolean active
+        boolean active,
+        @Schema(description = "The person's brokerage is suspended or cancelled — block every request (Flow 1)")
+        boolean tenantSuspended
 ) {
 }

@@ -1,18 +1,28 @@
 jest.mock('../../config/database');
+jest.mock('../../modules/platform/activity-log');
 
 import { getPrismaClient } from '../../config/database';
 import {
+  approveSuggestedTask,
   completeTask,
   createTask,
+  deleteTask,
   listForBrokers,
   listMyTasks,
   overdueCountByBroker,
 } from '../../modules/crm/task.service';
 import { teamWorkload } from '../../modules/crm/workload.service';
+import { recordActivity } from '../../modules/platform/activity-log';
 
 const mockPrisma = {
-  task: { create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
-  lead: { groupBy: jest.fn() },
+  task: {
+    create: jest.fn(),
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+  },
+  lead: { groupBy: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   mortgage: { findMany: jest.fn() },
 };
 
@@ -60,11 +70,53 @@ describe('completeTask', () => {
   });
 });
 
+describe('Flow 4.9 — AI-suggested tasks', () => {
+  const suggested = { id: 't1', tenantId: TENANT, brokerUserId: 'me', suggested: true };
+
+  it("can't be completed until approved", async () => {
+    mockPrisma.task.findUnique.mockResolvedValue(suggested);
+    await expect(completeTask(TENANT, 'me', 't1')).rejects.toMatchObject({ statusCode: 409 });
+    expect(mockPrisma.task.update).not.toHaveBeenCalled();
+  });
+
+  it('"Approve" turns it into a real task', async () => {
+    mockPrisma.task.findUnique.mockResolvedValue(suggested);
+    mockPrisma.task.update.mockResolvedValue({ ...suggested, suggested: false });
+    await approveSuggestedTask(TENANT, 'me', 't1');
+    expect(mockPrisma.task.update).toHaveBeenCalledWith({
+      where: { id: 't1' },
+      data: { suggested: false },
+    });
+  });
+
+  it('"Dismiss" deletes it — but never a real, linked task', async () => {
+    mockPrisma.task.findUnique.mockResolvedValue(suggested);
+    await deleteTask(TENANT, 'me', 't1');
+    expect(mockPrisma.task.delete).toHaveBeenCalledWith({ where: { id: 't1' } });
+
+    mockPrisma.task.delete.mockClear();
+    mockPrisma.task.findUnique.mockResolvedValue({ ...suggested, suggested: false });
+    await expect(deleteTask(TENANT, 'me', 't1')).rejects.toMatchObject({
+      statusCode: 409,
+    });
+    expect(mockPrisma.task.delete).not.toHaveBeenCalled();
+  });
+
+  it('only the owning broker can approve or dismiss', async () => {
+    mockPrisma.task.findUnique.mockResolvedValue({ ...suggested, brokerUserId: 'someone-else' });
+    await expect(approveSuggestedTask(TENANT, 'me', 't1')).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
+});
+
 describe('overdueCountByBroker', () => {
   it('shows a broker with no overdue tasks as 0, not omitted', async () => {
     mockPrisma.task.findMany.mockResolvedValue([{ brokerUserId: 'b1' }, { brokerUserId: 'b1' }]);
     const counts = await overdueCountByBroker(TENANT, ['b1', 'b2']);
     expect(counts).toEqual({ b1: 2, b2: 0 });
+    // A suggested task isn't real yet, so it can't be overdue.
+    expect(mockPrisma.task.findMany.mock.calls[0][0].where.suggested).toBe(false);
   });
 });
 
@@ -130,6 +182,24 @@ describe('listForBrokers — "Team tasks"', () => {
     expect(tasks).toHaveLength(1);
     expect(mockPrisma.task.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { tenantId: TENANT, brokerUserId: { in: ['b1', 'b2'] } } }),
+    );
+  });
+});
+
+describe('Flow 4.9 — "tick to complete, stays on the person\'s timeline"', () => {
+  it("records the completion on the person's activity timeline", async () => {
+    mockPrisma.task.findUnique.mockResolvedValue({
+      id: 't1',
+      tenantId: TENANT,
+      brokerUserId: 'me',
+      leadId: 'lead-1',
+      title: 'Call back',
+    });
+    mockPrisma.task.update.mockResolvedValue({ id: 't1', completed: true });
+    await completeTask(TENANT, 'me', 't1');
+    expect(recordActivity).toHaveBeenCalledWith(
+      'crm.task.completed',
+      expect.objectContaining({ targetType: 'lead', targetId: 'lead-1' }),
     );
   });
 });

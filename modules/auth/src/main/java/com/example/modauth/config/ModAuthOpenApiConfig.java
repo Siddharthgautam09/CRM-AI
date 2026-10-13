@@ -19,6 +19,22 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class ModAuthOpenApiConfig {
 
+    private static final String GUIDE = """
+            ## Using this API with the CRM
+            1. **Sign in**: `POST /api/v1/modauth/login` (Tenant Admin, Team Lead, Broker, Assistant) or
+               `POST /api/v1/auth/super-admin/login`. Run with `AUTH_TOKEN_DELIVERY_MODE=json` to get
+               `accessToken` in the response body (default: `access_token` cookie), then **Authorize**.
+            2. The same token works on the CRM/Platform API (port 3000, Swagger at `/docs`).
+            3. **Sessions**: access tokens last 15 minutes; refresh with `POST /api/v1/auth/refresh`.
+               A refresh more than `SESSION_IDLE_TIMEOUT_MINUTES` (30) after the previous one signs the
+               session out (inactivity); every session ends after 7 days. Refresh only on user activity.
+            4. **Passwords**: at least 12 characters, and not your current or last 5 passwords
+               (accept invitation, change password, forgot-password reset).
+            5. **Blocked sign-in**: 5 failed tries lock the account for 15 minutes (warning email sent);
+               a suspended or cancelled brokerage gets 403 at login and on refresh.
+            6. **My profile**: `GET/PATCH /api/v1/modauth/me` (name, phone).
+            """;
+
     @Bean
     public GlobalOpenApiCustomizer bearerAuthSchemeCustomizer() {
         return openApi -> {
@@ -30,6 +46,10 @@ public class ModAuthOpenApiConfig {
                     .scheme("bearer")
                     .bearerFormat("JWT")
                     .description("Paste the accessToken from /api/v1/modauth/login (json delivery mode) here"));
+            if (openApi.getInfo() != null) {
+                String base = openApi.getInfo().getDescription() == null ? "" : openApi.getInfo().getDescription() + "\n\n";
+                openApi.getInfo().setDescription(base + GUIDE);
+            }
         };
     }
 }

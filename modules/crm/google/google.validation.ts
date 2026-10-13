@@ -27,6 +27,7 @@ export const sendEmailSchema = z.object({
     subject: z.string().min(1).max(255),
     body: z.string().min(1).max(20000),
     leadId: z.string().uuid().optional(),
+    draftId: z.string().uuid().optional(),
   }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),

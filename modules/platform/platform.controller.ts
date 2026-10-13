@@ -10,6 +10,7 @@ import {
   reactivateBrokerage,
   startBrokerageCancellation,
   suspendBrokerage,
+  recordAuthEvent,
 } from './brokerage.service';
 import { getDownloadPath, getLatestExportForTenant } from './export.service';
 import { allowExtraToday, getUsageStatus, simulateUsage } from './usage.service';
@@ -58,6 +59,12 @@ export const downloadExportHandler = asyncHandler(async (req: Request, res: Resp
 
 export const ownerAcceptedWebhookHandler = asyncHandler(async (req: Request, res: Response) => {
   await markBrokerageOwnerAccepted(req.body.tenantId);
+  res.status(StatusCodes.NO_CONTENT).send();
+});
+
+/** modules/auth → platform: sign-in/security events for the Super Admin's activity log (Flow 1). */
+export const authEventWebhookHandler = asyncHandler(async (req: Request, res: Response) => {
+  await recordAuthEvent(req.body);
   res.status(StatusCodes.NO_CONTENT).send();
 });
 

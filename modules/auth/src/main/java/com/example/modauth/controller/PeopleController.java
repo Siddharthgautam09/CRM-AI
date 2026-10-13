@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.UUID;
 
 /** Implements the "People" flow diagram — list + deactivate Team Leads/Brokers. Tenant Admin only. */
-@Tag(name = "People", description = "Tenant Admin: list and deactivate the Team Leads/Brokers in a brokerage")
+@Tag(name = "People", description = "Tenant Admin: list and deactivate the Team Leads/Brokers in a brokerage — a Tenant Admin gets 403 until the brokerage profile is complete (CRM PATCH /api/v1/crm/tenant/profile)")
 @RestController
 @RequestMapping("/api/v1/modauth/people")
 @RequiredArgsConstructor
@@ -36,8 +36,10 @@ public class PeopleController {
         return peopleService.list(admin);
     }
 
-    @Operation(summary = "Deactivate a person", description = "Deactivates their account and revokes all sessions. "
-            + "Client-reassignment check is a no-op until the Leads/Clients model exists.")
+    @Operation(summary = "Deactivate a person", description = "Blocked with 409 \"Reassign their N clients first\" "
+            + "while they still hold any lead or client (checked live against the CRM — reassign with the CRM's "
+            + "POST /api/v1/crm/tenant/people/{userId}/reassign-clients). Otherwise deactivates the account and "
+            + "revokes all sessions.")
     @ApiResponse(responseCode = "404", description = "Person not found")
     @ApiResponse(responseCode = "403", description = "Not your brokerage's person, or target is a Tenant Admin")
     @PatchMapping("/{userId}/deactivate")

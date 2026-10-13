@@ -24,7 +24,12 @@ export const getBookingSettingsHandler = asyncHandler(async (req: Request, res: 
 });
 
 export const updateBookingSettingsHandler = asyncHandler(async (req: Request, res: Response) => {
-  const settings = await tenantService.updateBookingSettings(crmUser(req).tenantId, req.body);
+  const user = crmUser(req);
+  const settings = await tenantService.updateBookingSettings(
+    user.tenantId,
+    req.body,
+    user.bearerToken,
+  );
   res.status(StatusCodes.OK).json({ success: true, data: settings });
 });
 
@@ -55,3 +60,27 @@ export const downloadSelfServiceExportHandler = asyncHandler(
     res.download(filePath, 'brokerage-export.zip');
   },
 );
+
+export const brokerageDashboardHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const data = await tenantService.brokerageDashboard(user.tenantId, user.bearerToken);
+  res.status(StatusCodes.OK).json({ success: true, data });
+});
+
+export const reassignAllClientsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const user = crmUser(req);
+  const result = await tenantService.reassignAllClients(
+    user.tenantId,
+    user.bearerToken,
+    req.params.userId as string,
+    req.body.toBrokerUserId,
+    user.userId,
+  );
+  res.status(StatusCodes.OK).json({ success: true, data: result });
+});
+
+/** modules/auth's Tenant Admin gate (Flow 0) asks this before People/Teams/Invitations. */
+export const internalProfileStatusHandler = asyncHandler(async (req: Request, res: Response) => {
+  const complete = await tenantService.isProfileComplete(req.params.tenantId as string);
+  res.status(StatusCodes.OK).json({ success: true, data: { complete } });
+});

@@ -16,6 +16,8 @@ export interface ModAuthPerson {
   teamId: string | null;
   name: string | null;
   active: boolean;
+  /** Their brokerage is suspended or cancelled (Flow 1). */
+  tenantSuspended?: boolean;
 }
 
 /** Calls modules/auth's internal role lookup — the only way to resolve a modauth Role from a user id. */

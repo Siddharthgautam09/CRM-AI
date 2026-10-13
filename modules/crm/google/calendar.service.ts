@@ -1,3 +1,4 @@
+import type { Appointment } from '@prisma/client';
 import { google } from 'googleapis';
 
 import { getAuthenticatedClientOrNull } from './google-connection.service';
@@ -14,10 +15,9 @@ export interface CreateAppointmentInput {
 
 /**
  * "New appointment" (Flow 4.8): Google Calendar connected? No -> stays in
- * the CRM only. Yes -> pushed across. This pushes synchronously rather than
- * queuing — "queued and retried quietly" on a real failure is a background-
- * job system this CRM doesn't have; a failed push here just leaves
- * googleEventId null, same end state as never having connected.
+ * the CRM only. Yes -> pushed across. A failed push leaves googleEventId
+ * null and counts the attempt; the hourly sweep (reminder.service.ts) is the
+ * "queued and retried quietly" part.
  */
 export async function createAppointment(
   tenantId: string,
@@ -34,32 +34,35 @@ export async function createAppointment(
       endTime: new Date(input.endTime),
     },
   });
+  const pushed = await pushAppointment(appointment, input.attendeeEmails);
+  return { ...(pushed ?? appointment), pushedToGoogle: pushed !== null };
+}
 
-  const connection = await getAuthenticatedClientOrNull(brokerUserId);
-  if (!connection) {
-    return { ...appointment, pushedToGoogle: false };
-  }
-
+/** Push one appointment to its broker's Google Calendar; null if not connected or the push failed. */
+export async function pushAppointment(appointment: Appointment, attendeeEmails?: string[]) {
+  const connection = await getAuthenticatedClientOrNull(appointment.brokerUserId);
+  if (!connection) return null;
   try {
     const calendar = google.calendar({ version: 'v3', auth: connection.client });
     const { data: event } = await calendar.events.insert({
       calendarId: 'primary',
       requestBody: {
-        summary: input.title,
+        summary: appointment.title,
         start: { dateTime: appointment.startTime.toISOString() },
         end: { dateTime: appointment.endTime.toISOString() },
-        attendees: input.attendeeEmails?.map((email) => ({ email })),
+        attendees: attendeeEmails?.map((email) => ({ email })),
       },
     });
-    const updated = await getPrismaClient().appointment.update({
+    return await getPrismaClient().appointment.update({
       where: { id: appointment.id },
       data: { googleEventId: event.id },
     });
-    return { ...updated, pushedToGoogle: true };
   } catch {
-    // Matches the diagram's "stays in CRM only, with a prompt to connect" end
-    // state — the appointment row already exists either way.
-    return { ...appointment, pushedToGoogle: false };
+    await getPrismaClient().appointment.update({
+      where: { id: appointment.id },
+      data: { pushAttempts: { increment: 1 } },
+    });
+    return null;
   }
 }
 

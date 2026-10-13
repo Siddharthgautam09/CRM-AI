@@ -46,7 +46,10 @@ function sign(payload: Record<string, unknown>): string {
 }
 
 function mockReqRes(token?: string) {
-  const req = { headers: token ? { authorization: `Bearer ${token}` } : {}, cookies: {} } as unknown as Request;
+  const req = {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+    cookies: {},
+  } as unknown as Request;
   const res = {} as Response;
   const next = jest.fn() as unknown as NextFunction;
   return { req, res, next: next as jest.Mock };

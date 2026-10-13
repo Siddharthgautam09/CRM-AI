@@ -76,6 +76,11 @@ function mockTenantAdmin() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockPrisma.tenantProfile.findUnique.mockResolvedValue({
+    displayName: 'Acme',
+    supportEmail: 'help@acme.test',
+    phone: '555',
+  });
   (getPrismaClient as jest.Mock).mockReturnValue(mockPrisma);
 });
 
