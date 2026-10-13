@@ -19,10 +19,13 @@ Sign-in lives in the separate **auth service** (port 8102, its own Swagger at
 | Tenant Admin, Team Lead, Broker, Assistant | \`POST http://localhost:8102/api/v1/modauth/login\` \`{ "email", "password", "acceptTerms": true }\` |
 | Super Admin | \`POST http://localhost:8102/api/v1/auth/super-admin/login\` |
 
-The auth service sets the token as the \`access_token\` cookie by default. To get it in the JSON
-response instead (easier here), run it with \`AUTH_TOKEN_DELIVERY_MODE=json\` and copy
-\`accessToken\`. Then click **Authorize** and paste it into **crmBearer** (CRM) or
-**superAdminBearer** (Platform). Tokens last 15 minutes; refresh with
+**Easiest:** sign in from the auth service's Swagger in this same browser. It sets an
+\`access_token\` cookie for localhost, which this API reads too, so every request here is
+signed in with nothing to paste. Signing in as someone else switches who you are here.
+
+**Or paste a token:** run the auth service with \`AUTH_TOKENDELIVERYMODE=json\` to get
+\`accessToken\` in the login response, then click **Authorize** and paste it into
+**crmBearer** (CRM) or **superAdminBearer** (Platform). Tokens last 15 minutes; refresh with
 \`POST http://localhost:8102/api/v1/auth/refresh\`. A refresh more than 30 minutes after the last
 one is refused (signed out after inactivity), and sessions end after 7 days regardless.
 
