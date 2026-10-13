@@ -368,21 +368,29 @@ model GoogleConnection {
 
 // A meeting (Flow 4.8). googleEventId stays null — "stays in the CRM only" —
 // until/unless the owning broker has a GoogleConnection to push it to.
+// Flow 4.8 "New appointment: call · consultation · document review".
+enum AppointmentType {
+  CALL
+  CONSULTATION
+  DOCUMENT_REVIEW
+}
+
 model Appointment {
-  id            String   @id @default(uuid())
+  id            String          @id @default(uuid())
   tenantId      String
   brokerUserId  String
   leadId        String?
   title         String
+  type          AppointmentType @default(CONSULTATION)
   startTime     DateTime
   endTime       DateTime
   googleEventId String?
   // Flow 4.8 "Pushed across? No → queued and retried quietly" — see reminder.service.ts.
-  pushAttempts  Int      @default(0)
+  pushAttempts  Int             @default(0)
   // Flow 4.8 public booking — "Have we seen this booking before?"
   externalRef   String?
-  createdAt     DateTime @default(now())
-  lead          Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt     DateTime        @default(now())
+  lead          Lead?           @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, externalRef])
   @@index([tenantId])

@@ -15,6 +15,7 @@ export const createAppointmentSchema = z.object({
     startTime: z.string().datetime(),
     endTime: z.string().datetime(),
     leadId: z.string().uuid().optional(),
+    type: z.enum(['CALL', 'CONSULTATION', 'DOCUMENT_REVIEW']).default('CONSULTATION'),
     attendeeEmails: z.array(z.string().email()).optional(),
   }),
   query: z.object({}).optional(),
@@ -30,5 +31,14 @@ export const sendEmailSchema = z.object({
     draftId: z.string().uuid().optional(),
   }),
   query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});
+
+export const listAppointmentsSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+  }),
   params: z.object({}).optional(),
 });

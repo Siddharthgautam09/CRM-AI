@@ -1,3 +1,5 @@
+import type { Prisma } from '@prisma/client';
+
 import { missingDocuments } from './document-processing';
 import { removeStoredFiles } from './document-storage';
 import { decryptToken, encryptToken } from './encryption';
@@ -79,23 +81,111 @@ export function maskLead<T extends { sin: string | null; bankDetails: string | n
   return { ...rest, hasSin: sin !== null, hasBankDetails: bankDetails !== null };
 }
 
-/** "Leads" — everything not yet funded and not lost (the active pipeline). */
-export async function listMyLeads(tenantId: string, brokerIds: string[]) {
-  const leads = await getPrismaClient().lead.findMany({
-    where: { tenantId, brokerUserId: { in: brokerIds }, stage: { notIn: ['FUNDED', 'LOST'] } },
+const DAY = 24 * 60 * 60 * 1000;
+
+/** Flow 4 dashboard "hot leads" — shared with the leads-list filter so card and list agree. */
+export const HOT_STAGES: LeadStage[] = ['APPLICATION', 'UNDERWRITING', 'APPROVED'];
+
+/** Midnight UTC today — the dashboard and the list filters count days from here. */
+export function utcStartOfToday(now = new Date()) {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/** Days until this date-of-birth's next anniversary (0 = today), in UTC. */
+export function daysUntilBirthday(dob: Date, today: Date) {
+  const next = new Date(Date.UTC(today.getUTCFullYear(), dob.getUTCMonth(), dob.getUTCDate()));
+  if (next < today) next.setUTCFullYear(next.getUTCFullYear() + 1);
+  return Math.round((next.getTime() - today.getTime()) / DAY);
+}
+
+/** Follow-ups due on or before the end of day N from today (overdue ones included). */
+export function followUpCutoff(withinDays: number, today = utcStartOfToday()) {
+  return new Date(today.getTime() + (withinDays + 1) * DAY);
+}
+
+/**
+ * Flow 4 "Every card is clickable and lands on a filtered list" — the
+ * filters behind each dashboard card (see brokerDashboard's links).
+ * stages: explicit stages, or ['ALL'] for every stage; omitted = the
+ * list's own default (active pipeline for Leads, Funded for Clients).
+ */
+export interface LeadListFilter {
+  stages?: (LeadStage | 'ALL')[];
+  hot?: boolean;
+  renewalWithinDays?: number;
+  followUpWithinDays?: number;
+  birthdayWithinDays?: number;
+  missingDocuments?: boolean;
+}
+
+async function listBook(
+  tenantId: string,
+  brokerIds: string[],
+  defaultStage: Prisma.LeadWhereInput['stage'],
+  filter: LeadListFilter,
+  includeMortgages: boolean,
+) {
+  const today = utcStartOfToday();
+  const and: Prisma.LeadWhereInput[] = [];
+  if (!filter.stages?.length) and.push({ stage: defaultStage });
+  else if (!filter.stages.includes('ALL'))
+    and.push({ stage: { in: filter.stages as LeadStage[] } });
+  if (filter.hot) and.push({ stage: { in: HOT_STAGES } });
+  if (filter.renewalWithinDays !== undefined) {
+    const until = new Date(Date.now() + filter.renewalWithinDays * DAY);
+    and.push({ mortgages: { some: { maturityDate: { gte: new Date(), lte: until } } } });
+  }
+  if (filter.followUpWithinDays !== undefined) {
+    and.push({
+      followUps: {
+        some: { scheduledAt: { lt: followUpCutoff(filter.followUpWithinDays, today) } },
+      },
+    });
+  }
+  if (filter.birthdayWithinDays !== undefined) and.push({ dateOfBirth: { not: null } });
+  if (filter.missingDocuments) and.push({ NOT: { requiredDocuments: { isEmpty: true } } });
+
+  const rows = await getPrismaClient().lead.findMany({
+    where: { tenantId, brokerUserId: { in: brokerIds }, AND: and },
     orderBy: { createdAt: 'desc' },
+    include: {
+      mortgages: includeMortgages,
+      documents: filter.missingDocuments ? { select: { type: true } } : false,
+    },
   });
-  return leads.map(maskLead);
+  // The two filters Postgres can't express through Prisma: day-of-year and set difference.
+  return (
+    rows
+      .filter(
+        (l) =>
+          filter.birthdayWithinDays === undefined ||
+          daysUntilBirthday(l.dateOfBirth!, today) <= filter.birthdayWithinDays,
+      )
+      .filter(
+        (l) =>
+          !filter.missingDocuments || missingDocuments(l.requiredDocuments, l.documents).length > 0,
+      )
+      // documents was only fetched for the missing-documents check.
+      .map((l) => maskLead({ ...l, documents: undefined }))
+  );
+}
+
+/** "Leads" — by default everything not yet funded and not lost (the active pipeline). */
+export async function listMyLeads(
+  tenantId: string,
+  brokerIds: string[],
+  filter: LeadListFilter = {},
+) {
+  return listBook(tenantId, brokerIds, { notIn: ['FUNDED', 'LOST'] }, filter, false);
 }
 
 /** "Clients" — funded leads, each with their mortgage(s). */
-export async function listMyClients(tenantId: string, brokerIds: string[]) {
-  const clients = await getPrismaClient().lead.findMany({
-    where: { tenantId, brokerUserId: { in: brokerIds }, stage: 'FUNDED' },
-    orderBy: { createdAt: 'desc' },
-    include: { mortgages: true },
-  });
-  return clients.map(maskLead);
+export async function listMyClients(
+  tenantId: string,
+  brokerIds: string[],
+  filter: Omit<LeadListFilter, 'stages' | 'hot'> = {},
+) {
+  return listBook(tenantId, brokerIds, 'FUNDED', filter, true);
 }
 
 /** Throws 404 outside the tenant, 403 outside the given access set — used for both "own book" and "team book" access. */

@@ -62,7 +62,7 @@ const LEAD_ID = '11111111-1111-1111-1111-111111111111';
 
 const mockPrisma = {
   tenantProfile: { findUnique: jest.fn() },
-  lead: { findUnique: jest.fn(), update: jest.fn() },
+  lead: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
   leadDocument: { create: jest.fn() },
   notification: { create: jest.fn() },
   crmUserSettings: { findUnique: jest.fn() },
@@ -256,5 +256,40 @@ describe('Internal endpoints (X-Internal-Secret)', () => {
   it('rejects a call without the secret', async () => {
     const res = await request(app).get(`${BASE}/internal/tenants/${USER_ID}/profile-status`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe('Flow 4 — dashboard cards open filtered lists', () => {
+  it('parses comma-separated stages and flags from the query string', async () => {
+    mockPrisma.lead.findMany.mockResolvedValue([]);
+    const res = await request(app)
+      .get(`${BASE}/leads?stage=UNDERWRITING,APPROVED&hot=true`)
+      .set(as('BROKER'));
+    expect(res.status).toBe(200);
+    expect(mockPrisma.lead.findMany.mock.calls[0][0].where.AND).toEqual([
+      { stage: { in: ['UNDERWRITING', 'APPROVED'] } },
+      { stage: { in: ['APPLICATION', 'UNDERWRITING', 'APPROVED'] } },
+    ]);
+  });
+
+  it('rejects an unknown stage, a bad day count and an unknown due filter', async () => {
+    const bad = await Promise.all([
+      request(app).get(`${BASE}/leads?stage=BOGUS`).set(as('BROKER')),
+      request(app).get(`${BASE}/clients?renewalWithinDays=-1`).set(as('BROKER')),
+      request(app).get(`${BASE}/tasks?due=someday`).set(as('BROKER')),
+    ]);
+    expect(bad.map((r) => r.status)).toEqual([400, 400, 400]);
+  });
+});
+
+describe('Flow 4.8 — appointment type', () => {
+  it('rejects a type outside call · consultation · document review', async () => {
+    const res = await request(app).post(`${BASE}/appointments`).set(as('BROKER')).send({
+      title: 'Meet',
+      type: 'LUNCH',
+      startTime: '2026-11-01T15:00:00.000Z',
+      endTime: '2026-11-01T15:30:00.000Z',
+    });
+    expect(res.status).toBe(400);
   });
 });

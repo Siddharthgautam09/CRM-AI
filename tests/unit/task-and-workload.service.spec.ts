@@ -203,3 +203,18 @@ describe('Flow 4.9 — "tick to complete, stays on the person\'s timeline"', () 
     );
   });
 });
+
+describe('listMyTasks — dashboard task cards', () => {
+  it('due=today and due=overdue count real, open tasks only', async () => {
+    mockPrisma.task.findMany.mockResolvedValue([]);
+    await listMyTasks(TENANT, 'me', { due: 'today' });
+    const today = mockPrisma.task.findMany.mock.calls[0][0].where;
+    expect(today).toMatchObject({ completed: false, suggested: false });
+    expect(today.dueDate.gte).toBeInstanceOf(Date);
+    expect(today.dueDate.lt.getTime() - today.dueDate.gte.getTime()).toBe(24 * 60 * 60 * 1000);
+
+    await listMyTasks(TENANT, 'me', { due: 'overdue' });
+    const overdue = mockPrisma.task.findMany.mock.calls[1][0].where;
+    expect(overdue.dueDate).toEqual({ lt: today.dueDate.gte });
+  });
+});

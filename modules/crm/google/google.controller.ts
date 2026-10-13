@@ -51,7 +51,11 @@ export const createAppointmentHandler = asyncHandler(async (req: Request, res: R
 
 export const listMyAppointmentsHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
-  const appointments = await calendarService.listMyAppointments(user.tenantId, user.userId);
+  const appointments = await calendarService.listMyAppointments(
+    user.tenantId,
+    user.userId,
+    req.query,
+  );
   res.status(StatusCodes.OK).json({ success: true, data: appointments });
 });
 
