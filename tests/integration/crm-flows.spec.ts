@@ -293,3 +293,24 @@ describe('Flow 4.8 — appointment type', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("Bad input is the caller's error, not a 500", () => {
+  it('malformed JSON → 400 with a plain message', async () => {
+    const res = await request(app)
+      .patch(`${BASE}/settings`)
+      .set(as('BROKER'))
+      .set('Content-Type', 'application/json')
+      .send('{bad');
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Request body is not valid JSON');
+  });
+
+  it('an upload over the size limit → 413', async () => {
+    const res = await request(app)
+      .post(`${BASE}/voice-notes`)
+      .set(as('BROKER'))
+      .set('Content-Type', 'audio/webm')
+      .send(Buffer.alloc(11 * 1024 * 1024));
+    expect(res.status).toBe(413);
+  });
+});
