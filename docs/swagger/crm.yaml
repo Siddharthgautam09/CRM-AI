@@ -1879,7 +1879,11 @@ paths:
       requestBody:
         required: true
         content:
-          audio/*:
+          audio/webm:
+            schema: { type: string, format: binary }
+          audio/mpeg:
+            schema: { type: string, format: binary }
+          audio/mp4:
             schema: { type: string, format: binary }
       responses:
         '201':
@@ -2186,7 +2190,11 @@ paths:
       requestBody:
         required: true
         content:
-          '*/*':
+          application/pdf:
+            schema: { type: string, format: binary }
+          image/jpeg:
+            schema: { type: string, format: binary }
+          image/png:
             schema: { type: string, format: binary }
       responses:
         '201':
@@ -2367,7 +2375,11 @@ paths:
       requestBody:
         required: true
         content:
-          '*/*':
+          application/pdf:
+            schema: { type: string, format: binary }
+          image/jpeg:
+            schema: { type: string, format: binary }
+          image/png:
             schema: { type: string, format: binary }
       responses:
         '201':
