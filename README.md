@@ -145,6 +145,9 @@ docker run --rm -p 3000:3000 --env-file .env enterprise-backend-template
 docker compose up --build
 ```
 
+To set up a Mac from scratch and test every user flow by hand through Swagger, follow
+[`docs/manual-testing.md`](docs/manual-testing.md).
+
 ## Production Hardening Checklist
 
 - Replace demo users and mock auth stores
