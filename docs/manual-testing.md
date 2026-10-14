@@ -320,6 +320,70 @@ work the same way.
 | "Connect Gmail" / `pushedToGoogle: false`      | Expected locally. To test real Gmail and Calendar, add `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` to `.env` (see the comments in `.env.example`) and rebuild the app |
 | Uploaded document shows `readStatus: FAILED`   | Choose `application/pdf` or an image type in the media-type dropdown — other types count as unreadable                                                                |
 
+## Part F — Using Neon instead of local Postgres
+
+The stack can use hosted Postgres on [Neon](https://neon.tech) for all four databases, while
+Redis, Mongo and Mailhog stay local in Docker. `docker-compose.neon.yml` does the switch; your
+credentials stay in `.env` (git-ignored).
+
+### F1. Put the Neon details in `.env`
+
+From the Neon connection string `postgresql://USER:PASSWORD@ep-xxxx-pooler.<region>.aws.neon.tech/neondb?...`:
+
+```bash
+NEON_POOLER_HOST=ep-xxxx-pooler.<region>.aws.neon.tech
+NEON_DIRECT_HOST=ep-xxxx.<region>.aws.neon.tech        # same host without "-pooler"
+NEON_USER=neondb_owner
+NEON_PASSWORD=...
+NEON_USAGE_APP_PASSWORD=...   # make one: python3 -c "import secrets;print('Gu-'+secrets.token_urlsafe(32)+'-9Z')"
+```
+
+The Node app connects through the pooler; migrations and the Java services (Flyway) need the
+direct host.
+
+### F2. Create the databases and the usage app role (once)
+
+```bash
+set -a; . ./.env; set +a
+psql_neon() { docker run --rm -e PGPASSWORD="$NEON_PASSWORD" postgres:16-alpine \
+  psql "host=$NEON_DIRECT_HOST user=$NEON_USER dbname=$1 sslmode=require" -c "$2"; }
+
+for db in crm auth_db tenant_db genusg; do psql_neon neondb "CREATE DATABASE $db"; done
+
+# gen-usg-starter's migration would create this role with a weak built-in password,
+# which Neon rejects; creating it first with a strong one makes the migration skip it.
+psql_neon genusg "CREATE ROLE genusg_app LOGIN PASSWORD '$NEON_USAGE_APP_PASSWORD'"
+```
+
+### F3. Create the tables (once, and after pulling new migrations)
+
+```bash
+set -a; . ./.env; set +a
+DATABASE_URL="postgresql://$NEON_USER:$NEON_PASSWORD@$NEON_DIRECT_HOST/crm?sslmode=require" \
+  pnpm exec prisma migrate deploy
+DATABASE_URL="postgresql://$NEON_USER:$NEON_PASSWORD@$NEON_DIRECT_HOST/genusg?sslmode=require" \
+  pnpm exec prisma migrate deploy --schema lib/Gen_Usg-main/packages/gen-usg-starter/prisma/schema.prisma
+```
+
+The auth and tenant services create their own tables on Neon when they start.
+
+### F4. Start the stack on Neon
+
+```bash
+docker compose down
+docker compose -f docker-compose.yml -f docker-compose.neon.yml up --build -d
+```
+
+Only 8 services start — no local Postgres. Everything in Parts B and C works the same. Use the
+same `-f docker-compose.yml -f docker-compose.neon.yml` on every `docker compose` command
+(`ps`, `logs`, `restart`, `down`). To go back to local Postgres, drop the second `-f`.
+
+| Symptom                                                | Fix                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `create_app_role` migration fails: "insecure password" | Do the `CREATE ROLE genusg_app …` step in F2, then `pnpm exec prisma migrate resolve --rolled-back 20260728091000_create_app_role --schema lib/Gen_Usg-main/packages/gen-usg-starter/prisma/schema.prisma` (with the genusg `DATABASE_URL`) and run F3 again |
+| First request after a while is slow or times out       | Neon suspends an idle database; the first connection wakes it (a few seconds). Retry                                                                                                                                                                         |
+| `auth=` / `tenant=` services restart in a loop         | Check `docker compose … logs modauth` — usually a wrong `NEON_DIRECT_HOST` or password                                                                                                                                                                       |
+
 ## What is a placeholder (on purpose)
 
 - **AI** — review, drafts, transcripts, suggested tasks, AI Assistant, dashboard AI cards:
