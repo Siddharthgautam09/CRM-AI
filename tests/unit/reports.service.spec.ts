@@ -1,8 +1,9 @@
 jest.mock('../../config/database');
 jest.mock('../../modules/platform/activity-log');
-jest.mock('../../modules/platform/usage.service');
+jest.mock('../../modules/crm/ai.client');
 
 import { getPrismaClient } from '../../config/database';
+import { aiCall } from '../../modules/crm/ai.client';
 import {
   aiUsageReport,
   exportReportCsv,
@@ -12,7 +13,6 @@ import {
   teamPerformanceReport,
 } from '../../modules/crm/reports.service';
 import { recordActivity } from '../../modules/platform/activity-log';
-import { getUsageStatus } from '../../modules/platform/usage.service';
 
 const mockPrisma = {
   lead: { groupBy: jest.fn() },
@@ -90,20 +90,36 @@ describe('teamPerformanceReport', () => {
   });
 });
 
-describe('aiUsageReport — ignores broker scope, always tenant-wide', () => {
-  it('delegates straight to usage.service.getUsageStatus', async () => {
-    (getUsageStatus as jest.Mock).mockResolvedValue({ paused: false });
-    const result = await aiUsageReport(TENANT);
-    expect(getUsageStatus).toHaveBeenCalledWith(TENANT);
-    expect(result).toEqual({ paused: false });
+describe('aiUsageReport — per person, from the AI gateway', () => {
+  it('keeps the brokers in scope, zero for anyone with no AI use', async () => {
+    (aiCall as jest.Mock).mockResolvedValue({
+      rows: [
+        { key: 'b1', calls: 4, blocked: 1, credits: 12.5 },
+        { key: 'outside-scope', calls: 9, blocked: 0, credits: 30 },
+      ],
+    });
+    const result = await aiUsageReport({
+      tenantId: TENANT,
+      brokerIds: ['b1', 'b2'],
+      from: new Date('2026-10-01T12:00:00Z'),
+      to: new Date('2026-10-15T12:00:00Z'),
+    });
+    expect(aiCall).toHaveBeenCalledWith('gateway', 'GET', '/v1/usage/summary', {
+      caller: { tenantId: TENANT },
+      query: { from: '2026-10-01', to: '2026-10-15', groupBy: 'user' },
+    });
+    expect(result.rows).toEqual([
+      { brokerUserId: 'b1', calls: 4, credits: 12.5, blocked: 1 },
+      { brokerUserId: 'b2', calls: 0, credits: 0, blocked: 0 },
+    ]);
   });
 });
 
 describe('runReport', () => {
   it('dispatches to the right report by type', async () => {
-    (getUsageStatus as jest.Mock).mockResolvedValue({ paused: true });
+    (aiCall as jest.Mock).mockResolvedValue({ rows: [] });
     const result = await runReport('ai-usage', { tenantId: TENANT, brokerIds: [] });
-    expect(result).toEqual({ paused: true });
+    expect(result).toMatchObject({ rows: [] });
   });
 });
 

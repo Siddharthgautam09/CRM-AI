@@ -1,5 +1,9 @@
+import type { Task } from '@prisma/client';
+
+import { aiCall } from './ai.client';
 import { getLeadWithAccess, utcStartOfToday } from './lead.service';
 import { getPrismaClient } from '../../config/database';
+import { logger } from '../../config/logger';
 import { ApiError } from '../../utils/api-error';
 import { recordActivity } from '../platform/activity-log';
 
@@ -84,9 +88,23 @@ export async function completeTask(tenantId: string, brokerUserId: string, taskI
   return done;
 }
 
+/**
+ * An AI-suggested task's approve/dismiss, recorded in notes-svc so "Suggest
+ * tasks" never offers it again. Best effort: the broker's decision stands in
+ * the CRM even when the AI service is unreachable.
+ */
+async function recordAiDecision(task: Task, brokerUserId: string, decision: 'approved' | 'rejected') {
+  if (!task.aiSuggestionId || !task.aiRunId) return;
+  await aiCall('notes', 'POST', `/v1/runs/${task.aiRunId}/decisions`, {
+    caller: { tenantId: task.tenantId, userId: brokerUserId },
+    json: { decisions: [{ suggestionId: task.aiSuggestionId, decision }] },
+  }).catch((err) => logger.warn({ err, taskId: task.id }, 'ai.task_decision_not_recorded'));
+}
+
 /** Flow 4.9 "Approve — becomes a real task". */
 export async function approveSuggestedTask(tenantId: string, brokerUserId: string, taskId: string) {
-  await requireOwnSuggestedTask(tenantId, brokerUserId, taskId);
+  const task = await requireOwnSuggestedTask(tenantId, brokerUserId, taskId);
+  await recordAiDecision(task, brokerUserId, 'approved');
   return getPrismaClient().task.update({ where: { id: taskId }, data: { suggested: false } });
 }
 
@@ -100,6 +118,7 @@ export async function deleteTask(tenantId: string, brokerUserId: string, taskId:
   if (!task.suggested && !task.unlinked) {
     throw new ApiError('Only a suggested or unlinked task can be deleted', 409);
   }
+  if (task.suggested) await recordAiDecision(task, brokerUserId, 'rejected');
   await getPrismaClient().task.delete({ where: { id: taskId } });
 }
 

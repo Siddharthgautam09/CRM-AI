@@ -1,23 +1,35 @@
 import express, { Router } from 'express';
 
 import {
-  applyExtractedFieldsHandler,
+  analyseDraftNotesHandler,
+  analyseLeadNotesHandler,
+  applyReviewHandler,
   askAssistantHandler,
+  decideRunHandler,
   draftEmailHandler,
+  getEmailDraftHandler,
+  refineEmailDraftHandler,
+  retryEmailDraftHandler,
+  getRunHandler,
+  getVoiceNoteHandler,
   listEmailIntentsHandler,
-  reviewDraftNotesHandler,
-  retryTranscriptionHandler,
-  reviewLeadHandler,
-  saveVoiceNoteHandler,
+  retryRunHandler,
+  retryVoiceNoteHandler,
   suggestTasksHandler,
+  uploadVoiceNoteHandler,
 } from './ai-review.controller';
 import {
-  aiApplyFieldsSchema,
+  aiApplyReviewSchema,
   aiAssistantSchema,
   aiDraftEmailSchema,
+  aiEmailDraftSchema,
+  aiRefineEmailSchema,
+  aiIdParamSchema,
   aiLeadSchema,
   aiReviewDraftNotesSchema,
-  applyDocumentValuesSchema,
+  aiRunDecisionsSchema,
+  documentDecisionsSchema,
+  documentMortgageSchema,
   createEmailDraftSchema,
   documentIdParamSchema,
   publicBookingSchema,
@@ -29,6 +41,7 @@ import {
   updateSettingsSchema,
   uploadDocumentSchema,
 } from './ai-review.validation';
+import { aiCallbackHandler } from './ai-webhooks';
 import {
   contactCategoryCountsHandler,
   createContactHandler,
@@ -109,7 +122,11 @@ import {
   updateTagsSchema,
 } from './crm.validation';
 import {
-  applyDocumentValuesHandler,
+  applyDocumentReviewHandler,
+  confirmDocumentMortgageHandler,
+  decideDocumentHandler,
+  getDocumentReviewHandler,
+  retryDocumentReadHandler,
   downloadDocumentHandler,
   listDocumentsHandler,
   publicBookingHandler,
@@ -383,28 +400,49 @@ crmRouter.post(
   validate(revealFieldSchema),
   revealFieldHandler,
 );
-// AI touchpoints from the user flows (Untitled 2.md) — stubs, see
-// ai-review.service.ts. Book scope as the person panel; every AI call also
-// honours the user's AI switch and the brokerage's daily cost limit.
+// AI touchpoints from the user flows (Untitled 2.md), served by the AI services
+// (ai service/). Book scope as the person panel; the AI gateway enforces the
+// user's AI switch and the brokerage's limits on every AI call.
 const AI_USERS = ['BROKER', 'TEAM_LEAD', 'ASSISTANT'] as const;
-// Flow 4.1 voice note: the audio is kept; transcription (stub) can be retried.
+// Flow 4.1 voice note (voice-svc): the recording is kept, so transcription can be retried.
 crmRouter.post(
   '/voice-notes',
   requireModAuthRole(...AI_USERS),
-  express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '10mb' }),
-  saveVoiceNoteHandler,
+  express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '25mb' }),
+  uploadVoiceNoteHandler,
+);
+crmRouter.get(
+  '/voice-notes/:id',
+  requireModAuthRole(...AI_USERS),
+  validate(aiIdParamSchema),
+  getVoiceNoteHandler,
 );
 crmRouter.post(
   '/voice-notes/:id/transcribe',
   requireModAuthRole(...AI_USERS),
-  validate(taskIdParamSchema),
-  retryTranscriptionHandler,
+  validate(aiIdParamSchema),
+  retryVoiceNoteHandler,
 );
+// Flow 4.1 "Analyse notes" → 4.2 AI review (notes-svc): start a run, poll it, decide, then
+// POST /leads with aiRunId (new person) or /leads/:id/ai/apply (existing one).
 crmRouter.post(
   '/ai/review-notes',
   requireModAuthRole(...AI_USERS),
   validate(aiReviewDraftNotesSchema),
-  reviewDraftNotesHandler,
+  analyseDraftNotesHandler,
+);
+crmRouter.get('/ai/runs/:id', requireModAuthRole(...AI_USERS), validate(aiLeadSchema), getRunHandler);
+crmRouter.post(
+  '/ai/runs/:id/decisions',
+  requireModAuthRole(...AI_USERS),
+  validate(aiRunDecisionsSchema),
+  decideRunHandler,
+);
+crmRouter.post(
+  '/ai/runs/:id/retry',
+  requireModAuthRole(...AI_USERS),
+  validate(aiLeadSchema),
+  retryRunHandler,
 );
 crmRouter.post(
   '/ai/assistant',
@@ -412,12 +450,32 @@ crmRouter.post(
   validate(aiAssistantSchema),
   askAssistantHandler,
 );
+// Flow 4.7 AI email draft (email-svc): start it, poll it, refine it; then save
+// (POST /leads/:id/email-drafts) or send (POST /emails/send) — never sent automatically.
+crmRouter.get(
+  '/ai/email-drafts/:id',
+  requireModAuthRole(...AI_USERS),
+  validate(aiEmailDraftSchema),
+  getEmailDraftHandler,
+);
+crmRouter.post(
+  '/ai/email-drafts/:id/refine',
+  requireModAuthRole(...AI_USERS),
+  validate(aiRefineEmailSchema),
+  refineEmailDraftHandler,
+);
+crmRouter.post(
+  '/ai/email-drafts/:id/retry',
+  requireModAuthRole(...AI_USERS),
+  validate(aiIdParamSchema),
+  retryEmailDraftHandler,
+);
 crmRouter.get('/ai/email-intents', requireModAuthRole(...AI_USERS), listEmailIntentsHandler);
 crmRouter.post(
   '/leads/:id/ai/review',
   requireModAuthRole(...AI_USERS),
   validate(aiLeadSchema),
-  reviewLeadHandler,
+  analyseLeadNotesHandler,
 );
 crmRouter.post(
   '/leads/:id/ai/draft-email',
@@ -428,8 +486,8 @@ crmRouter.post(
 crmRouter.post(
   '/leads/:id/ai/apply',
   requireModAuthRole(...AI_USERS),
-  validate(aiApplyFieldsSchema),
-  applyExtractedFieldsHandler,
+  validate(aiApplyReviewSchema),
+  applyReviewHandler,
 );
 crmRouter.post(
   '/leads/:id/ai/suggest-tasks',
@@ -735,11 +793,37 @@ crmRouter.post(
   validate(requestDocumentsSchema),
   requestDocumentsHandler,
 );
+// Review what the AI document service read: look, decide each value, confirm the
+// mortgage, then apply (approved values fill blank fields only).
+crmRouter.get(
+  '/documents/:documentId/review',
+  requireModAuthRole(...DOC_USERS),
+  validate(documentIdParamSchema),
+  getDocumentReviewHandler,
+);
+crmRouter.post(
+  '/documents/:documentId/decisions',
+  requireModAuthRole(...DOC_USERS),
+  validate(documentDecisionsSchema),
+  decideDocumentHandler,
+);
+crmRouter.put(
+  '/documents/:documentId/mortgage',
+  requireModAuthRole(...DOC_USERS),
+  validate(documentMortgageSchema),
+  confirmDocumentMortgageHandler,
+);
+crmRouter.post(
+  '/documents/:documentId/retry',
+  requireModAuthRole(...DOC_USERS),
+  validate(documentIdParamSchema),
+  retryDocumentReadHandler,
+);
 crmRouter.post(
   '/documents/:documentId/apply',
   requireModAuthRole(...DOC_USERS),
-  validate(applyDocumentValuesSchema),
-  applyDocumentValuesHandler,
+  validate(documentIdParamSchema),
+  applyDocumentReviewHandler,
 );
 crmRouter.get(
   '/documents/:documentId/download',
@@ -777,6 +861,9 @@ crmRouter.post(
   publicDocumentUploadHandler,
 );
 crmRouter.post('/public/bookings/:slug', validate(publicBookingSchema), publicBookingHandler);
+
+// Signed job callbacks from the AI services — no login; the signature is the authentication.
+crmRouter.post('/webhooks/ai/:service', aiCallbackHandler);
 
 // Internal, service-to-service (X-Internal-Secret, no JWT) — modauth calls
 // this from PeopleServiceImpl.deactivate() (SOW 2.11).

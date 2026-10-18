@@ -5,7 +5,7 @@ dotenv.config();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   APP_NAME: z.string().default('Enterprise Backend Template'),
   API_PREFIX: z.string().default('/api/v1'),
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
@@ -35,15 +35,8 @@ const envSchema = z.object({
   BROKERAGE_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
   BROKERAGE_EXPORT_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
 
-  // ── modules/platform — usage & AI cost (Gen_USG) ───────────────────────────
-  // Gen_USG's own Postgres — connect as its unprivileged genusg_app role
-  // (created by its own migration), not the superuser used to run migrations.
-  USAGE_DATABASE_URL: z
-    .string()
-    .url()
-    .default('postgresql://genusg_app:genusg_app@localhost:5435/genusg'),
-  USAGE_REDIS_URL: z.string().default('redis://localhost:6382'),
-  AI_COST_DAILY_LIMIT: z.coerce.number().positive().default(50),
+  // ── modules/platform — AI cost (Flow 1) ──────────────────────────────────
+  // "Allow extra for today" raises a brokerage's daily AI cost cap to this (CAD).
   AI_COST_OVERRIDE_LIMIT: z.coerce.number().positive().default(100),
 
   // ── modules/crm — Google OAuth (Connect email/calendar, Flow 4.7/4.8) ──────
@@ -71,6 +64,32 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(20 * 1024 * 1024),
+  // ── AI services (ai service/ — gateway + the feature services) ─────────────
+  // Each key is one of that service's API_KEYS (its apps/<svc>/.env). Empty =
+  // the feature answers 503 "not configured" at call time; the app still boots.
+  AI_GATEWAY_URL: z.string().url().default('http://localhost:4201'),
+  AI_GATEWAY_KEY: z.string().default(''),
+  AI_GATEWAY_ADMIN_KEY: z.string().default(''),
+  AI_VOICE_URL: z.string().url().default('http://localhost:4202'),
+  AI_VOICE_KEY: z.string().default(''),
+  AI_DOCREAD_URL: z.string().url().default('http://localhost:4203'),
+  AI_DOCREAD_KEY: z.string().default(''),
+  AI_NOTES_URL: z.string().url().default('http://localhost:4204'),
+  AI_NOTES_KEY: z.string().default(''),
+  AI_EMAIL_URL: z.string().url().default('http://localhost:4205'),
+  AI_EMAIL_KEY: z.string().default(''),
+  AI_ASSISTANT_URL: z.string().url().default('http://localhost:4206'),
+  AI_ASSISTANT_KEY: z.string().default(''),
+  AI_SEARCH_URL: z.string().url().default('http://localhost:4207'),
+  AI_SEARCH_KEY: z.string().default(''),
+  // Where the AI services can reach this API for their signed job callbacks, as seen from
+  // their containers (e.g. http://host.docker.internal:4000). Empty = no callbacks.
+  AI_CALLBACK_BASE_URL: z.string().default(''),
+  // Each service's WEBHOOK_SECRET (its apps/<svc>/.env); signs the callbacks it sends.
+  AI_DOCREAD_WEBHOOK_SECRET: z.string().default(''),
+  // The key assistant-svc presents when it reads /ai-data/v1 (its CRM_API_KEY).
+  AI_DATA_API_KEY: z.string().default(''),
+
   // Off in tests; on in the server so reminders/digest/calendar retries run hourly.
   CRM_REMINDERS_ENABLED: z
     .enum(['true', 'false'])
@@ -115,9 +134,6 @@ export const env = {
     exportDownloadDays: e.BROKERAGE_EXPORT_DOWNLOAD_DAYS,
     retentionDays: e.BROKERAGE_RETENTION_DAYS,
     exportRetentionDays: e.BROKERAGE_EXPORT_RETENTION_DAYS,
-    usageDatabaseUrl: e.USAGE_DATABASE_URL,
-    usageRedisUrl: e.USAGE_REDIS_URL,
-    aiCostDailyLimit: e.AI_COST_DAILY_LIMIT,
     aiCostOverrideLimit: e.AI_COST_OVERRIDE_LIMIT,
   },
   google: {
@@ -125,6 +141,21 @@ export const env = {
     clientSecret: e.GOOGLE_CLIENT_SECRET,
     redirectUri: e.GOOGLE_REDIRECT_URI,
     tokenEncryptionKey: e.TOKEN_ENCRYPTION_KEY,
+  },
+  ai: {
+    gateway: { url: e.AI_GATEWAY_URL, key: e.AI_GATEWAY_KEY, adminKey: e.AI_GATEWAY_ADMIN_KEY },
+    voice: { url: e.AI_VOICE_URL, key: e.AI_VOICE_KEY },
+    docread: {
+      url: e.AI_DOCREAD_URL,
+      key: e.AI_DOCREAD_KEY,
+      webhookSecret: e.AI_DOCREAD_WEBHOOK_SECRET,
+    },
+    notes: { url: e.AI_NOTES_URL, key: e.AI_NOTES_KEY },
+    email: { url: e.AI_EMAIL_URL, key: e.AI_EMAIL_KEY },
+    assistant: { url: e.AI_ASSISTANT_URL, key: e.AI_ASSISTANT_KEY },
+    search: { url: e.AI_SEARCH_URL, key: e.AI_SEARCH_KEY },
+    dataApiKey: e.AI_DATA_API_KEY,
+    callbackBaseUrl: e.AI_CALLBACK_BASE_URL,
   },
   crm: {
     frontendUrl: e.CRM_FRONTEND_URL,

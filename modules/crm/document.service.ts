@@ -1,8 +1,8 @@
-import type { DocumentType, Prisma } from '@prisma/client';
+import type { DocumentType } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 
-import { applyExtractedFields, type ExtractedFields } from './ai-review.service';
-import { missingDocuments, readDocument, scanForViruses } from './document-processing';
+import { sendForReading } from './ai-documents.service';
+import { missingDocuments, scanForViruses } from './document-processing';
 import { readStoredFile, storeFile } from './document-storage';
 import * as gmailService from './google/gmail.service';
 import { getStatus as getGoogleStatus } from './google/google-connection.service';
@@ -59,12 +59,19 @@ export async function listDocuments(tenantId: string, leadId: string, allowedBro
 
 /**
  * "What happens to every file that arrives": virus check → (rejected, never
- * stored, broker notified) or stored → "Could the system read it?" → the
- * broker reviews the extracted values (applyDocumentValues). Every outcome
- * the broker needs to act on becomes a notification.
+ * stored, broker notified) or stored → "Could the system read it?" (the AI
+ * document service reads it in the background; ai-documents.service.ts tells
+ * the broker when it's ready to review, or that it couldn't be read).
  */
 async function ingestFile(
-  lead: { id: string; tenantId: string; brokerUserId: string; name: string },
+  lead: {
+    id: string;
+    tenantId: string;
+    brokerUserId: string;
+    name: string;
+    email: string | null;
+    propertyAddress: string | null;
+  },
   file: IncomingFile,
   uploadedBy: 'BROKER' | 'BORROWER',
 ) {
@@ -88,7 +95,6 @@ async function ingestFile(
   }
 
   const storagePath = await storeFile(lead.tenantId, file.data);
-  const read = await readDocument(file.type, file.mimeType);
   const doc = await getPrismaClient().leadDocument.create({
     data: {
       tenantId: lead.tenantId,
@@ -99,28 +105,12 @@ async function ingestFile(
       size: file.data.length,
       storagePath,
       uploadedBy,
-      readStatus: read.status,
-      extracted: read.extracted as Prisma.InputJsonObject,
+      readStatus: 'PENDING',
     },
-    omit: { storagePath: true },
   });
-
-  const outcome = {
-    READ: {
-      type: 'document.ready_for_review',
-      title: `Review the details read from ${file.fileName}`,
-    },
-    PARTIAL: {
-      type: 'document.partially_read',
-      title: `${file.fileName} was only partly read — check it`,
-    },
-    FAILED: {
-      type: 'document.unreadable',
-      title: `Couldn't read ${file.fileName} — retry, or type the values in`,
-    },
-  }[read.status];
-  await notify({ ...base, ...outcome, body: `${lead.name} · ${file.type}` });
-  return doc;
+  const { storagePath: stored, ...sent } = await sendForReading(doc, file, lead, uploadedBy);
+  void stored; // the file's location never leaves the server
+  return sent;
 }
 
 /** "Or upload files yourself". */
@@ -233,18 +223,6 @@ async function requireDocument(tenantId: string, documentId: string, allowedBrok
   }
   await getLeadWithAccess(tenantId, doc.leadId, allowedBrokerIds);
   return doc;
-}
-
-/** "Review the extracted details → Accept, edit or reject each value → filled in only if blank". */
-export async function applyDocumentValues(
-  tenantId: string,
-  documentId: string,
-  allowedBrokerIds: string[],
-  fields: ExtractedFields,
-  actorId: string,
-) {
-  const doc = await requireDocument(tenantId, documentId, allowedBrokerIds);
-  return applyExtractedFields(tenantId, doc.leadId, allowedBrokerIds, fields, actorId);
 }
 
 /** Downloads are recorded in the activity log (Flow 1). */

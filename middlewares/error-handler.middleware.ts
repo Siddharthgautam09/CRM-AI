@@ -47,6 +47,7 @@ export const errorHandlerMiddleware = (
   res.status(normalizedError.statusCode).json({
     success: false,
     message: normalizedError.message,
+    ...normalizedError.details,
     requestId: req.requestId,
     ...(env.nodeEnv !== 'production' && { stack: (error as Error)?.stack }),
   });

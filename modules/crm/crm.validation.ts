@@ -15,22 +15,8 @@ export const createLeadSchema = z.object({
     dateOfBirth: z.string().datetime().optional(),
     sin: z.string().min(1).max(50).optional(),
     bankDetails: z.string().min(1).max(1000).optional(),
-    acceptedTasks: z
-      .array(
-        z.object({
-          title: z.string().min(1).max(255),
-          dueDate: z.string().datetime().optional(),
-        }),
-      )
-      .max(20)
-      .optional(),
-    draftEmail: z
-      .object({
-        intent: z.string().max(50).optional(),
-        subject: z.string().min(1).max(255),
-        body: z.string().min(1).max(20000),
-      })
-      .optional(),
+    // Flow 4.2 "Save" after an AI review: what the broker approved in that run is applied too.
+    aiRunId: z.string().uuid().optional(),
   }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),

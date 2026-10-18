@@ -4,8 +4,10 @@ jest.mock('../../modules/crm/document-storage');
 jest.mock('../../modules/crm/google/gmail.service');
 jest.mock('../../modules/crm/google/google-connection.service');
 jest.mock('../../modules/crm/system-mailer');
+jest.mock('../../modules/crm/ai-documents.service');
 
 import { getPrismaClient } from '../../config/database';
+import { sendForReading } from '../../modules/crm/ai-documents.service';
 import { storeFile } from '../../modules/crm/document-storage';
 import * as docs from '../../modules/crm/document.service';
 import { sendEmail } from '../../modules/crm/google/gmail.service';
@@ -61,27 +63,20 @@ describe('"What happens to every file that arrives"', () => {
     });
   });
 
-  it('stores a clean file, reads it (stub) and asks the broker to review', async () => {
+  it('stores a clean file as "reading" and hands it to the AI document service', async () => {
+    (sendForReading as jest.Mock).mockImplementation(async (doc) => ({ ...doc, aiDocumentId: 'ai-1' }));
     const doc = await docs.uploadDocument(TENANT, 'lead-1', ['me'], pdf());
-    expect(doc).toMatchObject({
-      readStatus: 'READ',
-      uploadedBy: 'BROKER',
-      storagePath: 'tenant-1/key',
+    expect(mockPrisma.leadDocument.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ readStatus: 'PENDING', uploadedBy: 'BROKER', storagePath: 'tenant-1/key' }),
     });
-    expect(mockPrisma.notification.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ type: 'document.ready_for_review' }),
-    });
-  });
-
-  it('flags a file the system could not read', async () => {
-    const doc = await docs.uploadDocument(TENANT, 'lead-1', ['me'], {
-      ...pdf(),
-      mimeType: 'application/zip',
-    });
-    expect(doc.readStatus).toBe('FAILED');
-    expect(mockPrisma.notification.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ type: 'document.unreadable' }),
-    });
+    expect(sendForReading).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'doc-1' }),
+      expect.objectContaining({ fileName: 't4.pdf' }),
+      expect.objectContaining({ id: 'lead-1' }),
+      'BROKER',
+    );
+    expect(doc).toMatchObject({ aiDocumentId: 'ai-1' });
+    expect(doc).not.toHaveProperty('storagePath');
   });
 });
 

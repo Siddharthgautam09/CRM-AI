@@ -16,7 +16,6 @@ import {
   listBrokeragesHandler,
   ownerAcceptedWebhookHandler,
   reactivateBrokerageHandler,
-  simulateUsageHandler,
   startCancellationHandler,
   suspendBrokerageHandler,
 } from './platform.controller';
@@ -28,7 +27,6 @@ import {
   authEventWebhookSchema,
   ownerAcceptedWebhookSchema,
   reactivateBrokerageSchema,
-  simulateUsageSchema,
   suspendBrokerageSchema,
 } from './platform.validation';
 import { validate } from '../../middlewares/validate.middleware';
@@ -81,7 +79,7 @@ platformRouter.get(
 );
 platformRouter.get('/exports/:jobId/download', downloadExportHandler);
 
-// "Watching AI cost" — Gen_USG.
+// "Watching AI cost" — read from and set on the AI gateway (usage.service.ts).
 platformRouter.get(
   '/brokerages/:id/usage',
   validate(brokerageIdParamSchema),
@@ -91,12 +89,6 @@ platformRouter.post(
   '/brokerages/:id/usage/allow-extra-today',
   validate(brokerageIdParamSchema),
   allowExtraTodayHandler,
-);
-// Demo/test-only — see usage.service.ts's simulateUsage doc comment.
-platformRouter.post(
-  '/brokerages/:id/usage/simulate',
-  validate(simulateUsageSchema),
-  simulateUsageHandler,
 );
 
 // "My settings" and the Activity log's read side (every recordActivity call

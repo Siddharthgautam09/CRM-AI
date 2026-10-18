@@ -1,54 +1,107 @@
 import { z } from 'zod';
 
 import { EMAIL_INTENTS, type EmailIntent } from './ai-review.service';
-import { updateLeadProfileSchema } from './crm.validation';
 
 const leadParams = z.object({ id: z.string().uuid() });
 const emailIntent = z.enum(Object.keys(EMAIL_INTENTS) as [EmailIntent, ...EmailIntent[]]);
-const appliableFields = updateLeadProfileSchema.shape.body
-  .pick({
-    email: true,
-    phone: true,
-    city: true,
-    propertyAddress: true,
-    propertyValue: true,
-    income: true,
-    monthlyDebts: true,
-    downPayment: true,
-  })
-  .strict();
-
 export const aiLeadSchema = z.object({
   body: z.object({}).optional(),
   query: z.object({}).optional(),
   params: leadParams,
 });
 
+// The AI services' id format (voice notes; notes-svc runs are UUIDs).
+const aiId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+
+export const aiIdParamSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({}).optional(),
+  params: z.object({ id: aiId }),
+});
+
 export const aiReviewDraftNotesSchema = z.object({
   body: z.object({
-    name: z.string().max(255).optional(),
-    notes: z.string().min(1).max(20000),
-    // What's already typed into the form — only used to report what's missing.
-    fields: appliableFields.partial().optional(),
+    // notes-svc's MAX_NOTE_CHARS.
+    notes: z.string().trim().min(1).max(60000),
+    // What the form already holds: masked before the AI sees it, and never silently overwritten.
+    fields: z
+      .object({
+        name: z.string().max(255),
+        email: z.string().email(),
+        phone: z.string().max(50),
+        income: z.coerce.number().nonnegative(),
+        downPayment: z.coerce.number().nonnegative(),
+        dateOfBirth: z.string().datetime(),
+      })
+      .partial()
+      .optional(),
   }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),
 });
 
+/** "Accept, edit or reject each item" — notes-svc's decision list, checked again there. */
+export const aiRunDecisionsSchema = z.object({
+  body: z.object({
+    decisions: z
+      .array(
+        z
+          .object({
+            suggestionId: aiId,
+            decision: z.enum(['approved', 'edited', 'rejected', 'pending']),
+          })
+          .passthrough(),
+      )
+      .min(1)
+      .max(300),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({ id: z.string().uuid() }),
+});
+
 export const aiDraftEmailSchema = z.object({
-  body: z.object({ intent: emailIntent }),
+  body: z.object({
+    intent: emailIntent,
+    // Why you're writing — a follow-up needs it (or there is nothing to say).
+    purpose: z.string().trim().min(1).max(1000).optional(),
+    tone: z.enum(['professional', 'warm', 'concise']).optional(),
+  }),
   query: z.object({}).optional(),
   params: leadParams,
 });
 
-export const aiApplyFieldsSchema = z.object({
-  body: z.object({ fields: appliableFields }),
+export const aiEmailDraftSchema = z.object({
+  body: z.object({}).optional(),
+  query: z.object({ version: z.coerce.number().int().min(1).optional() }),
+  params: z.object({ id: aiId }),
+});
+
+export const aiRefineEmailSchema = z.object({
+  body: z.object({
+    instruction: z.string().trim().min(1).max(500),
+    fromVersion: z.number().int().min(1).optional(),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({ id: aiId }),
+});
+
+export const aiApplyReviewSchema = z.object({
+  body: z.object({ aiRunId: z.string().uuid() }),
   query: z.object({}).optional(),
   params: leadParams,
 });
 
 export const aiAssistantSchema = z.object({
-  body: z.object({ question: z.string().min(1).max(2000) }),
+  body: z.object({
+    question: z.string().trim().min(1).max(2000),
+    // The conversation so far (the frontend keeps it; nothing is stored).
+    history: z
+      .array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().min(1).max(4000) }))
+      .max(20)
+      .optional(),
+    // The person whose page the question was asked on, if any.
+    clientId: z.string().uuid().optional(),
+  }),
   query: z.object({}).optional(),
   params: z.object({}).optional(),
 });
@@ -121,8 +174,27 @@ export const documentIdParamSchema = z.object({
   params: z.object({ documentId: z.string().uuid() }),
 });
 
-export const applyDocumentValuesSchema = z.object({
-  body: z.object({ fields: appliableFields }),
+/** Flow 4.5 "Accept, edit or reject each value" — docread decisions, checked again there. */
+export const documentDecisionsSchema = z.object({
+  body: z.object({
+    decisions: z
+      .array(
+        z
+          .object({ fieldId: aiId, decision: z.enum(['approved', 'edited', 'rejected', 'pending']) })
+          .passthrough(),
+      )
+      .min(1)
+      .max(200),
+  }),
+  query: z.object({}).optional(),
+  params: z.object({ documentId: z.string().uuid() }),
+});
+
+export const documentMortgageSchema = z.object({
+  body: z.union([
+    z.object({ mortgageId: z.string().uuid() }).strict(),
+    z.object({ createNew: z.literal(true) }).strict(),
+  ]),
   query: z.object({}).optional(),
   params: z.object({ documentId: z.string().uuid() }),
 });

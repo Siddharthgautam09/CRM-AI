@@ -136,7 +136,7 @@ Pre-commit hook runs lint-staged.
 
 ```bash
 docker build -t enterprise-backend-template .
-docker run --rm -p 3000:3000 --env-file .env enterprise-backend-template
+docker run --rm -p 4000:4000 --env-file .env enterprise-backend-template
 ```
 
 ### Run full stack (app + postgres + mongo)
@@ -161,13 +161,13 @@ To set up a Mac from scratch and test every user flow by hand through Swagger, f
 ## Example API Calls
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/auth/login \
+curl -X POST http://localhost:4000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"Admin@12345"}'
 ```
 
 ```bash
-curl -X GET http://localhost:3000/api/v1/documents \
+curl -X GET http://localhost:4000/api/v1/documents \
   -H "Authorization: Bearer <access_token>"
 ```
 

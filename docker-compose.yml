@@ -2,12 +2,14 @@ services:
   app:
     build: .
     ports:
-      - '3000:3000'
+      - '4000:4000'
     env_file:
       - .env
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     environment:
       NODE_ENV: development
-      PORT: '3000'
+      PORT: '4000'
       APP_NAME: Enterprise Backend Template
       API_PREFIX: /api/v1
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
@@ -26,12 +28,18 @@ services:
       AUTH_JWT_AUDIENCE: modules-auth
       BROKERAGE_EXPORT_DOWNLOAD_DAYS: '7'
       BROKERAGE_EXPORT_RETENTION_DAYS: '30'
-      # ── modules/platform — usage & AI cost (Gen_USG) ─────────────────────
-      # genusg_app (not genusg, the migration superuser) — RLS-enforced,
-      # created by gen-usg-starter's own create_app_role migration.
-      USAGE_DATABASE_URL: postgresql://genusg_app:genusg_app@usage-postgres:5432/genusg
-      USAGE_REDIS_URL: redis://usage-redis:6379
-      AI_COST_DAILY_LIMIT: '50'
+      # ── AI services (ai service/docker/full-stack.yml, a separate stack) ──
+      # Reached through the host; their keys live in .env (AI_*_KEY).
+      AI_GATEWAY_URL: http://host.docker.internal:4201
+      AI_VOICE_URL: http://host.docker.internal:4202
+      AI_DOCREAD_URL: http://host.docker.internal:4203
+      AI_NOTES_URL: http://host.docker.internal:4204
+      AI_EMAIL_URL: http://host.docker.internal:4205
+      AI_ASSISTANT_URL: http://host.docker.internal:4206
+      AI_SEARCH_URL: http://host.docker.internal:4207
+      # Where the AI containers send their signed job callbacks back to this API.
+      AI_CALLBACK_BASE_URL: http://host.docker.internal:4000
+      # "Allow extra for today" raises the brokerage's daily AI cost cap to this (CAD).
       AI_COST_OVERRIDE_LIMIT: '100'
       # Must match modules/auth/src/main/resources/keys/public.pem exactly —
       # that's the private half of this same throwaway dev keypair.
@@ -112,10 +120,10 @@ services:
       # boot (check Mailhog at http://localhost:8026), not printed anywhere.
       SUPER_ADMIN_EMAIL: superadmin@example.com
       SUPER_ADMIN_PASSWORD: SuperAdmin@12345
-      PLATFORM_WEBHOOK_URL: http://app:3000/api/v1/platform/webhooks/owner-accepted
-      PLATFORM_EVENTS_URL: http://app:3000/api/v1/platform/webhooks/auth-events
+      PLATFORM_WEBHOOK_URL: http://app:4000/api/v1/platform/webhooks/owner-accepted
+      PLATFORM_EVENTS_URL: http://app:4000/api/v1/platform/webhooks/auth-events
       SESSION_IDLE_TIMEOUT_MINUTES: 30
-      CRM_BASE_URL: http://app:3000/api/v1/crm
+      CRM_BASE_URL: http://app:4000/api/v1/crm
     depends_on:
       auth-postgres:
         condition: service_healthy

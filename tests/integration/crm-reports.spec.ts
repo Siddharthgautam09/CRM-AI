@@ -44,13 +44,13 @@ function tokenFor(sub: string): string {
 
 jest.mock('../../modules/crm/modauth.client');
 jest.mock('../../modules/platform/activity-log');
-jest.mock('../../modules/platform/usage.service');
+jest.mock('../../modules/crm/ai.client');
 jest.mock('../../config/database');
 
 import { getPrismaClient } from '../../config/database';
+import { aiCall } from '../../modules/crm/ai.client';
 import { getModAuthPerson, getTenantPeople, resolveTeam } from '../../modules/crm/modauth.client';
 import { recordActivity } from '../../modules/platform/activity-log';
-import { getUsageStatus } from '../../modules/platform/usage.service';
 // eslint-disable-next-line import/order -- app must load after the mocks above are registered
 import { app } from '../../app';
 
@@ -187,21 +187,31 @@ describe('Reports — shared by Tenant Admin and Team Lead', () => {
     expect(res.status).toBe(403);
   });
 
-  it('ai-usage ignores broker/team filters and is tenant-wide', async () => {
+  it('ai-usage is per person in the Team Lead\'s scope, from the AI gateway', async () => {
     mockTeamLead();
     (resolveTeam as jest.Mock).mockResolvedValue({
       members: [],
       brokerIds: [LEAD_USER_ID, BROKER_A],
     });
-    (getUsageStatus as jest.Mock).mockResolvedValue({ paused: true, outcome: 'BLOCK' });
+    (aiCall as jest.Mock).mockResolvedValue({
+      rows: [{ key: BROKER_A, calls: 3, blocked: 0, credits: 7 }],
+    });
 
     const res = await request(app)
       .get(`${BASE}/reports?type=ai-usage`)
       .set('Authorization', `Bearer ${tokenFor(LEAD_USER_ID)}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.paused).toBe(true);
-    expect(getUsageStatus).toHaveBeenCalledWith(TENANT_ID);
+    expect(res.body.data.rows).toEqual([
+      { brokerUserId: LEAD_USER_ID, calls: 0, credits: 0, blocked: 0 },
+      { brokerUserId: BROKER_A, calls: 3, credits: 7, blocked: 0 },
+    ]);
+    expect(aiCall).toHaveBeenCalledWith(
+      'gateway',
+      'GET',
+      '/v1/usage/summary',
+      expect.objectContaining({ caller: { tenantId: TENANT_ID } }),
+    );
   });
 
   it('export returns a CSV download and records the activity', async () => {

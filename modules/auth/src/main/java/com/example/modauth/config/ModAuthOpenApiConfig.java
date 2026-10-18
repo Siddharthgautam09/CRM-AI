@@ -23,7 +23,7 @@ public class ModAuthOpenApiConfig {
             ## Using this API with the CRM
             1. **Sign in**: `POST /api/v1/modauth/login` (Tenant Admin, Team Lead, Broker, Assistant) or
                `POST /api/v1/auth/super-admin/login`. By default the token is set as an `access_token`
-               cookie for localhost — the CRM/Platform Swagger (port 3000, `/docs`) in the same browser
+               cookie for localhost — the CRM/Platform Swagger (port 4000, `/docs`) in the same browser
                then uses it automatically. Run with `AUTH_TOKENDELIVERYMODE=json` to get `accessToken`
                in the response body instead, then **Authorize**.
             2. The same token works on the CRM/Platform API.

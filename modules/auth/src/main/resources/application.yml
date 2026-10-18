@@ -123,4 +123,4 @@ modauth:
   # Same Node app, different route group — PeopleServiceImpl's deactivation
   # check (SOW 2.11) asks modules/crm "does this broker still have clients
   # assigned?" before allowing deactivation.
-  crm-base-url: ${CRM_BASE_URL:http://localhost:3000/api/v1/crm}
+  crm-base-url: ${CRM_BASE_URL:http://localhost:4000/api/v1/crm}

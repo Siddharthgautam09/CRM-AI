@@ -1,6 +1,5 @@
 import { Prisma } from '@prisma/client';
 
-import { removeStoredFiles } from './document-storage';
 import { pushAppointment } from './google/calendar.service';
 import { notify } from './notification.service';
 import { getPrismaClient } from '../../config/database';
@@ -212,18 +211,6 @@ async function retryCalendarPushes(now: Date) {
   }
 }
 
-/** Voice-note audio is only kept for the retry window (Flow 4.1), not forever. */
-async function cleanupVoiceNotes(now: Date) {
-  const cutoff = new Date(now.getTime() - 30 * DAY);
-  const old = await getPrismaClient().voiceNote.findMany({
-    where: { createdAt: { lt: cutoff } },
-    select: { id: true, storagePath: true },
-  });
-  if (old.length === 0) return;
-  await getPrismaClient().voiceNote.deleteMany({ where: { id: { in: old.map((v) => v.id) } } });
-  await removeStoredFiles(old.map((v) => v.storagePath));
-}
-
 export async function runReminderSweep(now = new Date()) {
   await renewalReminders(now);
   await birthdayReminders(now);
@@ -231,5 +218,4 @@ export async function runReminderSweep(now = new Date()) {
   await appointmentReminders(now);
   await morningDigest(now);
   await retryCalendarPushes(now);
-  await cleanupVoiceNotes(now);
 }

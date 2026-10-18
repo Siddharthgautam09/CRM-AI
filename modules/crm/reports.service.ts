@@ -1,6 +1,7 @@
+import { aiCall } from './ai.client';
 import { getPrismaClient } from '../../config/database';
 import { recordActivity } from '../platform/activity-log';
-import { getUsageStatus } from '../platform/usage.service';
+import { usageDay } from '../platform/usage.service';
 
 export type ReportType = 'pipeline' | 'renewals' | 'team-performance' | 'ai-usage';
 
@@ -102,12 +103,41 @@ export async function teamPerformanceReport(filter: ReportFilter) {
   }));
 }
 
+interface GatewayUsageRow {
+  key: string;
+  calls: number;
+  blocked: number;
+  credits: number;
+}
+
+const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+
 /**
- * "AI usage" — Gen_USG tracks per-tenant, not per-broker, so this ignores
- * the broker/team filter and always returns the whole tenant's figure.
+ * "AI usage" — each person's AI calls and credits from the AI gateway, within
+ * the broker/team scope. Credits, not dollars: the gateway shows the real
+ * provider cost to the Super Admin only. No date range = the last 30 days.
  */
-export async function aiUsageReport(tenantId: string) {
-  return getUsageStatus(tenantId);
+export async function aiUsageReport(filter: ReportFilter) {
+  const from = usageDay(filter.from ?? new Date(Date.now() - THIRTY_DAYS));
+  const to = usageDay(filter.to);
+  const summary = await aiCall<{ rows: GatewayUsageRow[] }>('gateway', 'GET', '/v1/usage/summary', {
+    caller: { tenantId: filter.tenantId },
+    query: { from, to, groupBy: 'user' },
+  });
+  const byUser = new Map(summary.rows.map((r) => [r.key, r]));
+  return {
+    from,
+    to,
+    rows: filter.brokerIds.map((brokerUserId) => {
+      const row = byUser.get(brokerUserId);
+      return {
+        brokerUserId,
+        calls: row?.calls ?? 0,
+        credits: row?.credits ?? 0,
+        blocked: row?.blocked ?? 0,
+      };
+    }),
+  };
 }
 
 export async function runReport(type: ReportType, filter: ReportFilter) {
@@ -119,7 +149,7 @@ export async function runReport(type: ReportType, filter: ReportFilter) {
     case 'team-performance':
       return teamPerformanceReport(filter);
     case 'ai-usage':
-      return aiUsageReport(filter.tenantId);
+      return aiUsageReport(filter);
   }
 }
 
@@ -130,7 +160,11 @@ export async function exportReportCsv(
   actorId: string,
 ): Promise<string> {
   const data = await runReport(type, filter);
-  const rows = Array.isArray(data) ? data : [data];
+  const rows = Array.isArray(data)
+    ? data
+    : type === 'ai-usage'
+      ? (data as Awaited<ReturnType<typeof aiUsageReport>>).rows
+      : [data];
   const csv = toCsv(rows);
   await recordActivity('crm.report.exported', {
     actorId,

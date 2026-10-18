@@ -31,46 +31,34 @@ export interface CreateLeadInput {
   dateOfBirth?: string;
   sin?: string;
   bankDetails?: string;
-  // Flow 4.2 "Save" after the AI review — accepted tasks and the draft email.
-  acceptedTasks?: { title: string; dueDate?: string }[];
-  draftEmail?: { intent?: string; subject: string; body: string };
 }
 
 type SensitiveField = 'sin' | 'bankDetails' | 'dateOfBirth';
 
 /**
  * "New client" (Flow 4.1) — applicants/income/debts/properties/down-payment/
- * notes, single-applicant scope (no co-applicant modeling). Voice notes and
- * AI review are a separate pipeline this repo doesn't have yet — notes are
- * taken as plain text, not transcribed or AI-analyzed. SIN and bank details
+ * notes, single-applicant scope (no co-applicant modeling). After an AI review,
+ * ai-notes.service.ts passes the approved applicant, tasks and draft email as
+ * `nested`, so they are saved with the lead or not at all. SIN and bank details
  * (Flow 4.3's "hidden values") are encrypted at rest and never returned by
  * the normal read paths — see revealSensitiveField.
  */
-export async function createLead(tenantId: string, brokerUserId: string, input: CreateLeadInput) {
-  const { dateOfBirth, sin, bankDetails, acceptedTasks, draftEmail, ...rest } = input;
-  // One nested create: the lead, the AI review's accepted tasks and its draft email
-  // (Flow 4.2 "Save") are saved together or not at all. Rejected items never arrive.
+export async function createLead(
+  tenantId: string,
+  brokerUserId: string,
+  input: CreateLeadInput,
+  nested: Pick<Prisma.LeadCreateInput, 'id' | 'applicants' | 'tasks' | 'emailDrafts'> = {},
+) {
+  const { dateOfBirth, sin, bankDetails, ...rest } = input;
   return getPrismaClient().lead.create({
     data: {
+      ...nested,
       tenantId,
       brokerUserId,
       ...rest,
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
       sin: sin ? encryptToken(sin) : undefined,
       bankDetails: bankDetails ? encryptToken(bankDetails) : undefined,
-      tasks: acceptedTasks?.length
-        ? {
-            create: acceptedTasks.map((t) => ({
-              tenantId,
-              brokerUserId,
-              title: t.title,
-              dueDate: t.dueDate ? new Date(t.dueDate) : null,
-            })),
-          }
-        : undefined,
-      emailDrafts: draftEmail
-        ? { create: { tenantId, brokerUserId, ...draftEmail, aiAssisted: true } }
-        : undefined,
     },
   });
 }

@@ -56,12 +56,6 @@ export const authEventWebhookSchema = z.object({
   params: z.object({}).optional(),
 });
 
-export const simulateUsageSchema = z.object({
-  body: z.object({ deltaUsdCents: z.coerce.number().int() }),
-  query: z.object({}).optional(),
-  params: z.object({ id: z.string().uuid() }),
-});
-
 export const activityLogQuerySchema = z.object({
   body: z.object({}).optional(),
   query: z.object({

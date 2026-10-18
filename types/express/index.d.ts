@@ -11,6 +11,8 @@ declare global {
       platformUser?: PlatformUser;
       /** Set by modules/crm/crm-auth.middleware.ts after resolving the caller's modauth Role. */
       crmUser?: CrmUser;
+      /** The exact JSON bytes received — AI service callbacks are signed over them. */
+      rawBody?: Buffer;
     }
   }
 }

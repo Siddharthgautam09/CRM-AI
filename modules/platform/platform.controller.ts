@@ -13,7 +13,7 @@ import {
   recordAuthEvent,
 } from './brokerage.service';
 import { getDownloadPath, getLatestExportForTenant } from './export.service';
-import { allowExtraToday, getUsageStatus, simulateUsage } from './usage.service';
+import { allowExtraToday, getUsageStatus } from './usage.service';
 import { asyncHandler } from '../../utils/async-handler';
 
 export const createBrokerageHandler = asyncHandler(async (req: Request, res: Response) => {
@@ -75,11 +75,6 @@ export const getUsageStatusHandler = asyncHandler(async (req: Request, res: Resp
 
 export const allowExtraTodayHandler = asyncHandler(async (req: Request, res: Response) => {
   const result = await allowExtraToday(req.params.id as string);
-  res.status(StatusCodes.OK).json({ success: true, data: result });
-});
-
-export const simulateUsageHandler = asyncHandler(async (req: Request, res: Response) => {
-  const result = await simulateUsage(req.params.id as string, req.body.deltaUsdCents);
   res.status(StatusCodes.OK).json({ success: true, data: result });
 });
 

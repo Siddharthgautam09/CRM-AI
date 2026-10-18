@@ -1,4 +1,4 @@
-export type UsageOutcome = 'ALLOW' | 'SOFT_WARN_80' | 'SOFT_WARN_95' | 'GRACE' | 'BLOCK';
+export type UsageOutcome = 'ALLOW' | 'SOFT_WARN_80' | 'SOFT_WARN_95' | 'BLOCK';
 
 export interface BrokerageUsageStatus {
   metric: string;

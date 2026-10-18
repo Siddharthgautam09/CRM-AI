@@ -66,8 +66,8 @@ The auth and tenant services create their own tables.
 
 | Open                          | Expect                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------- |
-| http://localhost:3000/health  | `{"status":"ok", …}`                                                         |
-| http://localhost:3000/docs    | **CRM + Platform Swagger** — the guide at the top, endpoints grouped by area |
+| http://localhost:4000/health  | `{"status":"ok", …}`                                                         |
+| http://localhost:4000/docs    | **CRM + Platform Swagger** — the guide at the top, endpoints grouped by area |
 | http://localhost:8102/v1/docs | **Auth Swagger** — Login, Invitations, People, Teams, My profile, Sessions   |
 | http://localhost:8026         | **Mailhog** — every email the system sends lands here                        |
 
@@ -216,7 +216,7 @@ notification sent.
 | #   | Call                                                        | Send                                                        | Expect                                                  |
 | --- | ----------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
 | 32  | `POST /crm/tasks`                                           | `{"title":"Call lender","leadId":"<id>","priority":"HIGH"}` | 201                                                     |
-| 33  | `POST /crm/leads/{id}/ai/suggest-tasks`                     |                                                             | A task with `suggested: true`                           |
+| 33  | `POST /crm/leads/{id}/ai/suggest-tasks`                     |                                                             | 202 while reading; call again → Suggested tasks         |
 | 34  | `PATCH /crm/tasks/{suggestedId}/complete`                   |                                                             | 409 — approve it first                                  |
 | 35  | `PATCH /crm/tasks/{suggestedId}/approve`, then `…/complete` |                                                             | Approved, then completed; shows in the panel's activity |
 
@@ -316,7 +316,7 @@ work the same way.
 | `403` "… cannot access this"                   | That role isn't allowed — expected; see `docs/permission-matrix.md`                                                                                                   |
 | `500` on any AI call                           | The usage database wasn't migrated — Part A4, second command                                                                                                          |
 | `500` / "relation … does not exist"            | The CRM database wasn't migrated — Part A4                                                                                                                            |
-| A port is already in use                       | Something else uses 3000/5432/8102/8103/8026 — stop it, or change the left-hand port in `docker-compose.yml`                                                          |
+| A port is already in use                       | Something else uses 4000/5432/8102/8103/8026 — stop it, or change the left-hand port in `docker-compose.yml`                                                          |
 | "Connect Gmail" / `pushedToGoogle: false`      | Expected locally. To test real Gmail and Calendar, add `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` to `.env` (see the comments in `.env.example`) and rebuild the app |
 | Uploaded document shows `readStatus: FAILED`   | Choose `application/pdf` or an image type in the media-type dropdown — other types count as unreadable                                                                |
 

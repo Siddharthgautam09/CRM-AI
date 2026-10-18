@@ -1,7 +1,9 @@
 jest.mock('../../config/database');
 jest.mock('../../modules/platform/activity-log');
+jest.mock('../../modules/crm/ai.client');
 
 import { getPrismaClient } from '../../config/database';
+import { aiCall } from '../../modules/crm/ai.client';
 import {
   approveSuggestedTask,
   completeTask,
@@ -100,6 +102,17 @@ describe('Flow 4.9 — AI-suggested tasks', () => {
       statusCode: 409,
     });
     expect(mockPrisma.task.delete).not.toHaveBeenCalled();
+  });
+
+  it('an AI-suggested task: dismissing is recorded in notes-svc, so "Suggest tasks" never offers it again', async () => {
+    mockPrisma.task.findUnique.mockResolvedValue({ ...suggested, aiSuggestionId: 's1', aiRunId: 'r1' });
+    (aiCall as jest.Mock).mockRejectedValueOnce(new Error('AI down'));
+    await deleteTask(TENANT, 'me', 't1');
+    expect(aiCall).toHaveBeenCalledWith('notes', 'POST', '/v1/runs/r1/decisions', expect.objectContaining({
+      json: { decisions: [{ suggestionId: 's1', decision: 'rejected' }] },
+    }));
+    // The broker's dismissal stands even when the AI service is down.
+    expect(mockPrisma.task.delete).toHaveBeenCalled();
   });
 
   it('only the owning broker can approve or dismiss', async () => {

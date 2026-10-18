@@ -1,6 +1,9 @@
 import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 
+import * as aiAssistant from './ai-assistant.service';
+import * as aiEmail from './ai-email.service';
+import * as aiNotes from './ai-notes.service';
 import * as aiReviewService from './ai-review.service';
 import { leadAccessIds } from './crm-auth.middleware';
 import { asyncHandler } from '../../utils/async-handler';
@@ -10,89 +13,108 @@ function crmUser(req: Request) {
   return req.crmUser!;
 }
 
-export const saveVoiceNoteHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = crmUser(req);
+/** Who the AI services act for: brokerage, user and role from the verified CRM user. */
+function aiCaller(req: Request) {
+  const { tenantId, userId, role } = crmUser(req);
+  return { tenantId, userId, role };
+}
+
+const id = (req: Request) => req.params.id as string;
+
+// Jobs answer 202: the frontend polls the matching GET until a terminal status.
+export const uploadVoiceNoteHandler = asyncHandler(async (req: Request, res: Response) => {
   const audio = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-  const result = await aiReviewService.saveVoiceNote(
-    user.tenantId,
-    user.userId,
+  const note = await aiNotes.uploadVoiceNote(
+    aiCaller(req),
     audio,
     req.headers['content-type'] ?? 'application/octet-stream',
   );
-  res.status(StatusCodes.CREATED).json({ success: true, data: result });
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: note });
 });
 
-export const retryTranscriptionHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = crmUser(req);
-  const result = await aiReviewService.retryTranscription(
-    user.tenantId,
-    user.userId,
-    req.params.id as string,
+export const getVoiceNoteHandler = asyncHandler(async (req: Request, res: Response) => {
+  res.json({ success: true, data: await aiNotes.getVoiceNote(aiCaller(req), id(req)) });
+});
+
+export const retryVoiceNoteHandler = asyncHandler(async (req: Request, res: Response) => {
+  const note = await aiNotes.retryVoiceNote(aiCaller(req), id(req));
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: note });
+});
+
+export const analyseDraftNotesHandler = asyncHandler(async (req: Request, res: Response) => {
+  const run = await aiNotes.analyseDraftNotes(aiCaller(req), req.body);
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: run });
+});
+
+export const analyseLeadNotesHandler = asyncHandler(async (req: Request, res: Response) => {
+  const run = await aiNotes.analyseLeadNotes(aiCaller(req), id(req), await leadAccessIds(crmUser(req)));
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: run });
+});
+
+export const getRunHandler = asyncHandler(async (req: Request, res: Response) => {
+  const run = await aiNotes.getRun(aiCaller(req), id(req), await leadAccessIds(crmUser(req)));
+  res.json({ success: true, data: run });
+});
+
+export const decideRunHandler = asyncHandler(async (req: Request, res: Response) => {
+  const run = await aiNotes.decideRun(
+    aiCaller(req),
+    id(req),
+    await leadAccessIds(crmUser(req)),
+    req.body.decisions,
   );
-  res.status(StatusCodes.OK).json({ success: true, data: result });
+  res.json({ success: true, data: run });
 });
 
-export const reviewDraftNotesHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = crmUser(req);
-  const review = await aiReviewService.reviewDraftNotes(user.tenantId, user.userId, req.body);
-  res.status(StatusCodes.OK).json({ success: true, data: review });
+export const retryRunHandler = asyncHandler(async (req: Request, res: Response) => {
+  const run = await aiNotes.retryRun(aiCaller(req), id(req), await leadAccessIds(crmUser(req)));
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: run });
 });
 
-export const reviewLeadHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = crmUser(req);
-  const review = await aiReviewService.reviewLead(
-    user.tenantId,
-    user.userId,
-    req.params.id as string,
-    await leadAccessIds(user),
+export const applyReviewHandler = asyncHandler(async (req: Request, res: Response) => {
+  const result = await aiNotes.applyReviewToLead(
+    aiCaller(req),
+    await leadAccessIds(crmUser(req)),
+    id(req),
+    req.body.aiRunId,
   );
-  res.status(StatusCodes.OK).json({ success: true, data: review });
+  res.json({ success: true, data: result });
 });
 
 export const draftEmailHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = crmUser(req);
-  const draft = await aiReviewService.draftEmail(
-    user.tenantId,
-    user.userId,
-    req.params.id as string,
-    await leadAccessIds(user),
-    req.body.intent,
+  const draft = await aiEmail.startEmailDraft(
+    { ...aiCaller(req), name: crmUser(req).name },
+    id(req),
+    await leadAccessIds(crmUser(req)),
+    req.body,
   );
-  res.status(StatusCodes.OK).json({ success: true, data: draft });
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: draft });
+});
+
+export const getEmailDraftHandler = asyncHandler(async (req: Request, res: Response) => {
+  const version = req.query.version ? Number(req.query.version) : undefined;
+  const draft = await aiEmail.getEmailDraft(aiCaller(req), id(req), await leadAccessIds(crmUser(req)), version);
+  res.json({ success: true, data: draft });
+});
+
+export const refineEmailDraftHandler = asyncHandler(async (req: Request, res: Response) => {
+  const draft = await aiEmail.refineEmailDraft(aiCaller(req), id(req), await leadAccessIds(crmUser(req)), req.body);
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: draft });
+});
+
+export const retryEmailDraftHandler = asyncHandler(async (req: Request, res: Response) => {
+  const draft = await aiEmail.retryEmailDraft(aiCaller(req), id(req), await leadAccessIds(crmUser(req)));
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: draft });
 });
 
 export const suggestTasksHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = crmUser(req);
-  const tasks = await aiReviewService.suggestTasks(
-    user.tenantId,
-    user.userId,
-    req.params.id as string,
-    await leadAccessIds(user),
-  );
-  res.status(StatusCodes.CREATED).json({ success: true, data: tasks });
+  const result = await aiNotes.suggestTasks(aiCaller(req), id(req), await leadAccessIds(crmUser(req)));
+  res.status(result.ready ? StatusCodes.OK : StatusCodes.ACCEPTED).json({ success: true, data: result });
 });
 
 export const askAssistantHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = crmUser(req);
-  const answer = await aiReviewService.askAssistant(
-    user.tenantId,
-    user.userId,
-    await leadAccessIds(user),
-    req.body.question,
-  );
+  const answer = await aiAssistant.askAssistant(aiCaller(req), await leadAccessIds(crmUser(req)), req.body);
   res.status(StatusCodes.OK).json({ success: true, data: answer });
-});
-
-export const applyExtractedFieldsHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = crmUser(req);
-  const result = await aiReviewService.applyExtractedFields(
-    user.tenantId,
-    req.params.id as string,
-    await leadAccessIds(user),
-    req.body.fields,
-    user.userId,
-  );
-  res.status(StatusCodes.OK).json({ success: true, data: result });
 });
 
 export const listEmailIntentsHandler = asyncHandler(async (_req: Request, res: Response) => {

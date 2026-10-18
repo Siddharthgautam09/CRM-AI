@@ -4,160 +4,186 @@ import type { Options } from 'swagger-jsdoc';
 import swaggerJSDoc from 'swagger-jsdoc';
 
 import { env } from './env';
+import { REQUEST_EXAMPLES } from './swagger-examples';
+
+// Local/dev only: the seeded test accounts from docs/manual-testing.md.
+const TEST_ACCOUNTS =
+  env.nodeEnv === 'production'
+    ? ''
+    : `
+**Test accounts (local only):**
+
+| Sign in as | Email | Password | Use |
+| --- | --- | --- | --- |
+| Team Lead | \`leah@acme.test\` | \`LeahPassword#2026\` | POST /session/login |
+| Tenant Admin | \`tara@acme.test\` | \`TaraPassword#2026\` | POST /session/login |
+| Super Admin | \`superadmin@example.com\` | \`SuperAdmin@12345\` | POST /session/super-admin-login |
+`;
 
 const GETTING_STARTED = `
-Backend for the mortgage CRM — every flow in the product's user-flow document.
-Endpoints are grouped by area below; each says which roles may call it.
+Everything the mortgage CRM can do, with a **Try it out** button on each item.
+You can test the whole product from this page — no other tool needed.
 
-## 1. Get a token
+## How to use this page
 
-Sign-in lives in the separate **auth service** (port 8102, its own Swagger at
-\`http://localhost:8102/v1/docs\`):
+1. **Sign in first.** Open **Start here — sign in** below → **POST /session/login** →
+   **Try it out** → **Execute**. The example is already filled in with a test account.
+2. **Pick anything and try it.** Open an item → **Try it out** → change the example if you
+   like → **Execute**. You stay signed in on this page until your session ends.
+3. **Read the answer** under *Server response*. Green 2xx = it worked.
 
-| Who | Call |
+Need an id (a person, a task…)? Run the matching **list** item first (for example
+**GET /crm/leads**) and copy an \`id\` from its answer.
+${TEST_ACCOUNTS}
+## Who can do what
+
+| Role | Works on |
 | --- | --- |
-| Tenant Admin, Team Lead, Broker, Assistant | \`POST http://localhost:8102/api/v1/modauth/login\` \`{ "email", "password", "acceptTerms": true }\` |
-| Super Admin | \`POST http://localhost:8102/api/v1/auth/super-admin/login\` |
+| **Broker** | Their own clients |
+| **Team Lead** | Their own clients plus everyone on their team |
+| **Assistant** | Their team's clients (view and edit; never create, delete or reveal hidden values) |
+| **Tenant Admin** | Runs one brokerage: people, teams, reports, settings (must fill in the brokerage profile first) |
+| **Super Admin** | Runs the platform: brokerages, AI cost, activity log. Never sees client records |
 
-**Easiest:** sign in from the auth service's Swagger in this same browser. It sets an
-\`access_token\` cookie for localhost, which this API reads too, so every request here is
-signed in with nothing to paste. Signing in as someone else switches who you are here.
+Each item says which roles may use it. Using one you are not allowed to gives **403**.
 
-**Or paste a token:** run the auth service with \`AUTH_TOKENDELIVERYMODE=json\` to get
-\`accessToken\` in the login response, then click **Authorize** and paste it into
-**crmBearer** (CRM) or **superAdminBearer** (Platform). Tokens last 15 minutes; refresh with
-\`POST http://localhost:8102/api/v1/auth/refresh\`. A refresh more than 30 minutes after the last
-one is refused (signed out after inactivity), and sessions end after 7 days regardless.
+## AI features — how they work
 
-## 2. Roles
+AI never saves anything by itself. Every AI feature follows the same steps:
 
-**SA** Super Admin · **TA** Tenant Admin · **TL** Team Lead · **BR** Broker · **AS** Assistant.
-A Broker works their own book; a Team Lead their own book plus every person on their team; an
-Assistant their team's book (view/edit, never create/delete/reveal). A Tenant Admin must complete
-the brokerage profile before any other Tenant Admin screen works. The full table is
-\`docs/permission-matrix.md\`.
+1. **Start it** (for example *Analyse notes*) → you get an \`id\` and status \`queued\`.
+2. **Check on it** with the matching GET until the status is finished
+   (\`completed\`, \`processed\`… or \`failed\`). It usually takes a few seconds.
+3. **Decide**: accept, edit or reject each suggestion.
+4. **Save**: only what you accepted goes into the CRM.
 
-## 3. Conventions
+Anything written by AI is marked \`aiLabel: "AI-assisted processing"\`.
+If AI is switched off for you the answer is **403 AI_DISABLED**; if today's AI allowance is
+used up it is **429 AI_LIMIT_REACHED** with \`resetsAt\` (when it comes back).
 
-- Success: \`{ "success": true, "data": … }\`. Errors: \`{ "success": false, "message": "…" }\`
-  with 400 (validation), 401 (no/expired token), 403 (role, scope, suspended brokerage,
-  AI switched off), 404, 409 (conflict), 429 (daily AI allowance used up).
-- **AI endpoints are stubs**: real access checks, the user's AI switch and the brokerage's daily
-  AI limit, but placeholder output marked \`"stub": true\` until the AI team connects a model.
-- File uploads (documents, voice notes) send the **raw file as the request body** with its
-  \`Content-Type\`; document type and file name go in the query string.
-- **Public** endpoints need no login (borrower upload link, booking page).
-  **Internal** ones are service-to-service only (\`X-Internal-Secret\` header).
+## What the answers look like
 
-## 4. A typical walk-through
+- Worked: \`{ "success": true, "data": … }\`
+- Didn't: \`{ "success": false, "message": "what went wrong, in words" }\`
 
-1. Broker: \`POST /crm/ai/review-notes\` → review → \`POST /crm/leads\` with \`acceptedTasks\`/\`draftEmail\`.
-2. \`PUT /crm/leads/{id}/documents/required\` → \`POST /crm/leads/{id}/documents/request\` → the
-   borrower uploads at \`/crm/public/document-requests/{token}/files\` → \`POST /crm/documents/{id}/apply\`.
-3. \`PATCH /crm/leads/{id}/stage\` … \`POST /crm/leads/{id}/fund\` (creates the mortgage; renewal
-   reminders follow automatically) → \`GET /crm/notifications\`.
+| Code | Means |
+| --- | --- |
+| 400 | Something in the request is missing or wrong — the message says what |
+| 401 | Not signed in, or the session ended — sign in again |
+| 403 | You are not allowed to do this (role, team, or AI switched off) |
+| 404 | Not found (or not yours to see) |
+| 409 | Can't right now (already done, or in the wrong state) |
+| 429 | Daily AI allowance used up |
+| 503 | An AI service is not reachable — try again shortly |
+
+**Uploading a file** (documents, voice notes): pick the file in **Try it out**; the type and file
+name go in the boxes above it. **Public** items need no sign-in (the borrower's upload link, the
+booking page). **Internal** items are for the system's own services, not for people.
 `;
 
 /** Area tags, in the order Swagger UI shows them. First matching rule wins. */
 const TAGS: { name: string; description: string; match: RegExp }[] = [
-  { name: 'Health', description: 'Liveness check', match: /^\/health/ },
   {
-    name: 'Public (no login)',
-    description: 'Borrower document-upload link and the brokerage booking page',
-    match: /^\/crm\/public\//,
-  },
-  {
-    name: 'Internal (service-to-service)',
-    description: 'Called by the other services with X-Internal-Secret — not for browsers',
-    match: /^\/(crm\/internal|platform\/webhooks)\//,
-  },
-  {
-    name: 'Platform — Brokerages',
-    description: 'SA: create, suspend, reactivate, cancel brokerages; exports',
-    match: /^\/platform\/(brokerages(?!\/\{id\}\/usage)|exports)/,
-  },
-  {
-    name: 'Platform — Usage & AI cost',
-    description: 'SA: daily AI cost per brokerage, "allow extra for today"',
-    match: /^\/platform\/brokerages\/\{id\}\/usage/,
-  },
-  {
-    name: 'Platform — Activity log',
-    description: 'SA: everything recorded, filter and export',
-    match: /^\/platform\/activity-log/,
-  },
-  { name: 'Platform — My settings', description: 'SA: own account', match: /^\/platform\/me/ },
-  {
-    name: 'AI (stubs)',
-    description: 'BR/TL/AS: voice notes, note review, email drafts, suggested tasks, AI Assistant',
-    match: /^\/crm\/(ai\/|voice-notes|leads\/\{id\}\/ai\/)/,
+    name: 'Start here — sign in',
+    description: 'Sign in once, then every other section on this page works for you',
+    match: /^\/session\//,
   },
   {
     name: 'Dashboard & search',
-    description: 'BR/TL/AS: broker dashboard and search',
+    description: 'Broker, Team Lead, Assistant: the home screen and searching your clients',
     match: /^\/crm\/(dashboard|search)$/,
   },
   {
     name: 'Leads & clients',
-    description: 'BR/TL (AS view/edit): create, list, stage, fund, mortgages, delete',
+    description: 'Add a person, list leads and clients, move them through stages, fund, delete',
     match: /^\/crm\/(leads(\/\{id\}(\/(stage|fund|mortgages))?)?|clients)$/,
   },
   {
-    name: 'Client intake',
-    description: 'Applicants, employment, income, debts, properties, funds, follow-ups',
-    match: /^\/crm\/leads\/\{id\}\/(intake|applicants|debts|properties|funds-sources|follow-ups)/,
+    name: 'AI features',
+    description:
+      'Voice notes, "Analyse notes" and the AI review, email drafts, suggested tasks, AI Assistant. ' +
+      'Start → check status → decide → save (see "AI features — how they work" above)',
+    match: /^\/crm\/(ai\/|voice-notes|leads\/\{id\}\/ai\/)/,
   },
   {
     name: 'Person panel',
-    description: 'The same panel everywhere: profile, affordability, notes, tags, reveal',
+    description: 'One person\'s profile, affordability, notes, tags; reveal hidden values',
     match: /^\/crm\/leads\/(\{id\}\/(panel|affordability|notes|tags|profile|reveal)|affordability)/,
   },
   {
+    name: 'Client intake',
+    description: 'The full application: applicants, jobs, income, debts, properties, savings, follow-ups',
+    match: /^\/crm\/leads\/\{id\}\/(intake|applicants|debts|properties|funds-sources|follow-ups)/,
+  },
+  {
     name: 'Documents',
-    description: 'Checklist, borrower request link, uploads, review read values',
+    description: 'Which documents a person must send, the upload link, uploads, using what was read',
     match: /^\/crm\/(leads\/\{id\}\/documents|documents\/)/,
   },
   {
     name: 'Email',
-    description: 'Send from your own inbox; saved drafts',
+    description: 'Send from your own inbox; saved drafts (nothing is ever sent automatically)',
     match: /^\/crm\/(emails|email-drafts|leads\/\{id\}\/email-drafts)/,
   },
   {
-    name: 'Calendar & Google',
-    description: 'Connect Google, appointments, team calendar',
-    match: /^\/crm\/(integrations\/google|appointments|team\/calendar)/,
-  },
-  {
     name: 'Tasks',
-    description: 'Tasks, suggested and unlinked tasks',
+    description: 'Your tasks, suggested tasks to approve, tasks whose person was deleted',
     match: /^\/crm\/(team\/)?tasks/,
   },
   {
-    name: 'Contacts',
-    description: 'Centres of influence (realtors, lawyers, …)',
-    match: /^\/crm\/(team\/)?contacts/,
+    name: 'Calendar & Google',
+    description: 'Connect Google, appointments, the team calendar',
+    match: /^\/crm\/(integrations\/google|appointments|team\/calendar)/,
   },
   {
+    name: 'Contacts',
+    description: 'Realtors, lawyers and other people you work with',
+    match: /^\/crm\/(team\/)?contacts/,
+  },
+  { name: 'Notifications', description: 'Reminders and the morning digest', match: /^\/crm\/notifications/ },
+  { name: 'My settings', description: 'Switch AI features on or off for yourself', match: /^\/crm\/settings/ },
+  {
     name: 'Team Lead',
-    description: 'TL: team dashboard, team book, reassign',
+    description: 'Team Lead only: team dashboard, the team\'s clients, moving a client to another broker',
     match: /^\/crm\/team\//,
   },
   {
     name: 'Tenant Admin',
-    description: 'TA: brokerage dashboard, profile, booking page, book, export, reassign',
+    description: 'Tenant Admin only: brokerage dashboard, profile, booking page, all clients, data export',
     match: /^\/crm\/tenant\//,
   },
   {
     name: 'Reports',
-    description: 'TA (tenant-wide) / TL (team): reports and CSV',
+    description: 'Tenant Admin (whole brokerage) and Team Lead (own team): reports and spreadsheet export',
     match: /^\/crm\/reports/,
   },
   {
-    name: 'Notifications',
-    description: 'Reminders, the 9am digest and "you were notified" events',
-    match: /^\/crm\/notifications/,
+    name: 'Platform — Brokerages',
+    description: 'Super Admin: create, suspend, reactivate and cancel brokerages; their data exports',
+    match: /^\/platform\/(brokerages(?!\/\{id\}\/usage)|exports)/,
   },
-  { name: 'My settings', description: 'AI features on or off', match: /^\/crm\/settings/ },
+  {
+    name: 'Platform — AI cost',
+    description: 'Super Admin: today\'s AI cost per brokerage against its daily cap; "allow extra for today"',
+    match: /^\/platform\/brokerages\/\{id\}\/usage/,
+  },
+  {
+    name: 'Platform — Activity log',
+    description: 'Super Admin: everything that happened, filter and export',
+    match: /^\/platform\/activity-log/,
+  },
+  { name: 'Platform — My account', description: 'Super Admin: who you are signed in as', match: /^\/platform\/me/ },
+  {
+    name: 'Public (no login)',
+    description: 'What a borrower or a visitor uses: the document-upload link and the booking page',
+    match: /^\/crm\/public\//,
+  },
+  {
+    name: 'Internal (service-to-service)',
+    description: 'Used by the system\'s own services with a secret header — not for people',
+    match: /^\/(crm\/(internal|webhooks)|platform\/webhooks)\//,
+  },
+  { name: 'Health', description: 'Is the server up?', match: /^\/health/ },
 ];
 
 const ERROR = { $ref: '#/components/schemas/Error' };
@@ -167,10 +193,11 @@ const errorResponse = (description: string) => ({
 });
 
 type Operation = {
+  summary?: string;
   tags?: string[];
   security?: unknown[];
   parameters?: { in?: string }[];
-  requestBody?: unknown;
+  requestBody?: { content?: Record<string, { example?: unknown; examples?: unknown }> };
   responses?: Record<string, unknown>;
 };
 
@@ -183,8 +210,15 @@ function enrich(spec: Record<string, unknown>) {
   const paths = spec.paths as Record<string, Record<string, Operation>>;
   for (const [route, ops] of Object.entries(paths)) {
     const tag = TAGS.find((t) => t.match.test(route))?.name;
-    for (const op of Object.values(ops)) {
+    for (const [method, op] of Object.entries(ops)) {
       if (tag) op.tags = [tag];
+      // Internal spec references mean nothing to the reader of this page.
+      if (op.summary) op.summary = op.summary.replace(/\s*\((?:SOW|Flow)[^)]*\)|\s*— STUB\b/g, '');
+      const json = op.requestBody?.content?.['application/json'];
+      const example = REQUEST_EXAMPLES[`${method.toUpperCase()} ${route}`];
+      if (json && example !== undefined && json.example === undefined && !json.examples) {
+        json.example = example;
+      }
       const responses = (op.responses ??= {});
       const add = (code: string, text: string) => {
         responses[code] ??= errorResponse(text);
@@ -204,7 +238,10 @@ function enrich(spec: Record<string, unknown>) {
         add('403', 'Not allowed — wrong role, outside your scope, or your brokerage is suspended');
       }
       if (route.includes('{')) add('404', 'Not found');
-      if (tag === 'AI (stubs)') add('429', "Your brokerage's daily AI allowance is used up");
+      if (tag === 'AI features') {
+        add('429', "AI_LIMIT_REACHED — today's AI allowance is used up; resetsAt says when it comes back");
+        add('503', 'An AI service is not reachable right now — try again shortly');
+      }
       add('500', 'Something failed on the server');
     }
   }
@@ -216,7 +253,7 @@ export const swaggerOptions: Options = {
   definition: {
     openapi: '3.0.3',
     info: {
-      title: `${env.appName} API`,
+      title: 'Mortgage CRM — API (try everything here)',
       version: '1.0.0',
       description: GETTING_STARTED,
     },

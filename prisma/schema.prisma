@@ -331,20 +331,24 @@ enum TaskPriority {
 }
 
 model Task {
-  id           String       @id @default(uuid())
-  tenantId     String
-  brokerUserId String
-  leadId       String?
-  title        String
-  dueDate      DateTime?
-  completed    Boolean      @default(false)
+  id             String       @id @default(uuid())
+  tenantId       String
+  brokerUserId   String
+  leadId         String?
+  title          String
+  dueDate        DateTime?
+  completed      Boolean      @default(false)
   // Flow 4.9 — "Suggested by AI": not a real task until approved (dismiss deletes it).
-  suggested    Boolean      @default(false)
-  priority     TaskPriority @default(MEDIUM)
+  suggested      Boolean      @default(false)
+  priority       TaskPriority @default(MEDIUM)
   // Flow 4.9 "The person was deleted? → shown separately as unlinked".
-  unlinked     Boolean      @default(false)
-  createdAt    DateTime     @default(now())
-  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  unlinked       Boolean      @default(false)
+  // notes-svc suggestion (and its run) — the same AI suggestion never becomes two
+  // tasks, and approve/dismiss is recorded there so asking again skips it.
+  aiSuggestionId String?      @unique
+  aiRunId        String?
+  createdAt      DateTime     @default(now())
+  lead           Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([brokerUserId])
@@ -478,28 +482,30 @@ enum DocumentType {
   OTHER
 }
 
-// "Could the system read it?" — OCR is a stub (client-owned pipeline).
+// "Could the system read it?" — read by the AI document service (docread-svc).
 enum DocumentReadStatus {
+  PENDING
   READ
   PARTIAL
   FAILED
 }
 
 model LeadDocument {
-  id          String             @id @default(uuid())
-  tenantId    String
-  leadId      String
-  type        DocumentType
-  fileName    String
-  mimeType    String
-  size        Int
-  storagePath String
+  id           String             @id @default(uuid())
+  tenantId     String
+  leadId       String
+  type         DocumentType
+  fileName     String
+  mimeType     String
+  size         Int
+  storagePath  String
   // BROKER uploaded it themselves; BORROWER came through the request link.
-  uploadedBy  String
-  readStatus  DocumentReadStatus
-  extracted   Json?
-  createdAt   DateTime           @default(now())
-  lead        Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  uploadedBy   String
+  readStatus   DocumentReadStatus
+  // docread-svc's id for its copy; its review holds the values read until approved.
+  aiDocumentId String?
+  createdAt    DateTime           @default(now())
+  lead         Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([leadId])
@@ -539,18 +545,4 @@ model Notification {
 model ReminderLog {
   key       String   @id
   createdAt DateTime @default(now())
-}
-
-// Flow 4.1 "Did it transcribe? No → audio is saved, retry, or type the notes".
-model VoiceNote {
-  id          String   @id @default(uuid())
-  tenantId    String
-  userId      String
-  storagePath String
-  mimeType    String
-  size        Int
-  transcript  String?
-  createdAt   DateTime @default(now())
-
-  @@index([userId, createdAt])
 }

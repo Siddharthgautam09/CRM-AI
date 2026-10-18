@@ -1,11 +1,9 @@
 jest.mock('../../config/database');
 jest.mock('../../modules/crm/google/calendar.service');
-jest.mock('../../modules/crm/document-storage');
 
 import { Prisma } from '@prisma/client';
 
 import { getPrismaClient } from '../../config/database';
-import { removeStoredFiles } from '../../modules/crm/document-storage';
 import { pushAppointment } from '../../modules/crm/google/calendar.service';
 import { runReminderSweep } from '../../modules/crm/reminder.service';
 
@@ -29,7 +27,6 @@ const mockPrisma = {
   appointment: { findMany: jest.fn() },
   task: { findMany: jest.fn() },
   notification: { create: jest.fn() },
-  voiceNote: { findMany: jest.fn(), deleteMany: jest.fn() },
 };
 
 const NOW = new Date('2026-10-12T14:00:00.000Z');
@@ -44,7 +41,6 @@ beforeEach(() => {
   mockPrisma.followUp.findMany.mockResolvedValue([]);
   mockPrisma.appointment.findMany.mockResolvedValue([]);
   mockPrisma.task.findMany.mockResolvedValue([]);
-  mockPrisma.voiceNote.findMany.mockResolvedValue([]);
 });
 
 function titles() {
@@ -114,12 +110,3 @@ it('calendar retry: after the last failed attempt, "Reconnect your calendar" onc
   expect(titles()).toEqual(['Reconnect your calendar']);
 });
 
-it('voice-note audio older than 30 days is deleted with its file', async () => {
-  mockPrisma.voiceNote.findMany.mockResolvedValue([{ id: 'vn-1', storagePath: 't1/old' }]);
-  await runReminderSweep(NOW);
-  expect(mockPrisma.voiceNote.findMany.mock.calls[0][0].where.createdAt.lt).toEqual(
-    new Date(NOW.getTime() - 30 * 24 * 60 * 60 * 1000),
-  );
-  expect(mockPrisma.voiceNote.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['vn-1'] } } });
-  expect(removeStoredFiles).toHaveBeenCalledWith(['t1/old']);
-});

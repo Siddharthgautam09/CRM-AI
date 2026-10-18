@@ -43,5 +43,5 @@ COPY docs ./docs
 COPY modules/platform ./modules/platform
 COPY modules/crm ./modules/crm
 COPY .env.example ./.env
-EXPOSE 3000
+EXPOSE 4000
 CMD ["node", "dist/server.js"]

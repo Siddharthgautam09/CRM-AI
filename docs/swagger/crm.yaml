@@ -207,23 +207,16 @@ components:
             type: string,
             description: 'Encrypted at rest (AES-256-GCM) — never returned by any read path except the reveal endpoint.',
           }
-        acceptedTasks:
-          type: array
-          description: 'Flow 4.2 "Save" — AI-review tasks the broker accepted; created with the lead in one transaction.'
-          items:
-            type: object
-            required: [title]
-            properties:
-              title: { type: string }
-              dueDate: { type: string, format: date-time }
-        draftEmail:
-          type: object
-          description: 'Flow 4.2 — the accepted AI draft, saved (never sent) and marked AI-assisted.'
-          required: [subject, body]
-          properties:
-            intent: { type: string }
-            subject: { type: string }
-            body: { type: string }
+        aiRunId:
+          type: string
+          format: uuid
+          description: >
+            Flow 4.2 "Save" after an AI review (POST /crm/ai/review-notes). The
+            review is linked to the new person and finalized (undecided values
+            count as rejected); approved values fill blank fields only (unless
+            the broker chose to replace one), and the approved applicant,
+            tasks and email draft (saved, never sent) are created with the
+            lead. The response is then { lead, applied, skipped, notApplied }.
     Affordability:
       type: object
       description: 'Ratios, stress-tested rate and maximum purchase price (Flow 4.4) — always computed live, never cached for a single read.'
@@ -301,40 +294,40 @@ components:
           properties:
             items: { type: array, items: { type: object } }
             missing: { type: array, items: { type: string } }
-    AiDraftEmail:
+    VoiceNote:
       type: object
-      description: 'STUB — placeholder output until the AI team wires a model in.'
       properties:
-        stub: { type: boolean, enum: [true] }
-        disclosure: { type: string }
-        intent:
-          {
-            type: string,
-            enum: [FOLLOW_UP, RENEWAL, BIRTHDAY, DOCUMENTS, ANNUAL_REVIEW, REFINANCE],
-          }
-        subject: { type: string }
-        body: { type: string }
-    AiReview:
+        id: { type: string }
+        status: { type: string, enum: [queued, processing, completed, failed] }
+        transcript: { type: string, nullable: true }
+        aiLabel: { type: string, nullable: true }
+        durationSec: { type: number, nullable: true }
+        error:
+          type: object
+          nullable: true
+          properties: { code: { type: string }, message: { type: string }, retryable: { type: boolean } }
+        createdAt: { type: string, format: date-time }
+    AiRun:
       type: object
-      description: 'STUB (SOW 5.14–5.23) — fixed placeholder output; only missingFields reflects the real lead.'
+      description: >
+        One AI reading of a person's notes (notes-svc run). Poll until status is
+        processed / processed_with_errors (review open: fields, tasks and
+        emailDraft, each with an id to decide) or failed (error, retry if
+        error.retryable). Everything AI-made carries aiLabel, which the UI shows.
       properties:
-        stub: { type: boolean, enum: [true] }
-        disclosure: { type: string }
-        summary: { type: string }
-        intent: { type: string }
-        urgency: { type: string, enum: [LOW, MEDIUM, HIGH] }
-        extractedFields: { type: object, additionalProperties: true }
-        missingFields: { type: array, items: { type: string } }
-        painPoints: { type: array, items: { type: string } }
-        opportunities: { type: array, items: { type: string } }
-        draftEmail: { $ref: '#/components/schemas/AiDraftEmail' }
-        proposedTasks:
-          type: array
-          items:
-            type: object
-            properties:
-              title: { type: string }
-              dueInDays: { type: integer }
+        id: { type: string, format: uuid }
+        clientId: { type: string, nullable: true, description: 'The person, once linked' }
+        status: { type: string, enum: [queued, processing, processed, processed_with_errors, failed] }
+        reviewStatus: { type: string, enum: [not_ready, pending, finalized] }
+        warnings: { type: array, items: { type: string } }
+        error:
+          type: object
+          nullable: true
+          properties: { code: { type: string }, message: { type: string }, retryable: { type: boolean } }
+        fields: { type: array, nullable: true, items: { type: object }, description: 'Suggested profile values: id, label, display, confidenceLevel, decision, existing…' }
+        tasks: { type: array, nullable: true, items: { type: object } }
+        emailDraft: { type: object, nullable: true }
+        aiLabel: { type: string, nullable: true, example: AI-assisted processing }
     Mortgage:
       type: object
       properties:
@@ -1138,32 +1131,39 @@ paths:
   /crm/leads/{id}/ai/review:
     post:
       tags: [CRM]
-      summary: 'AI note review (SOW 5.14–5.23) — STUB'
+      summary: 'AI tools tab — read this person''s notes again (Flow 4.3 → 4.2)'
       description: >
-        Placeholder output behind the real access check and the brokerage's
-        Gen_USG daily AI cost limit. Broker, Team Lead, or the team's Assistant.
+        Starts an AI reading (notes-svc) of the person's original and own notes.
+        The same notes give back the same run rather than a new charge. Poll
+        GET /crm/ai/runs/{runId}, decide, then POST /crm/leads/{id}/ai/apply.
       security: [{ crmBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
-        '200':
-          description: The review
+        '202':
+          description: The run, queued
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   success: { type: boolean }
-                  data: { $ref: '#/components/schemas/AiReview' }
-        '403':
-          description: "You don't have access to this record"
-        '429':
-          description: 'AI paused for the brokerage today (daily cost limit reached)'
+                  data: { $ref: '#/components/schemas/AiRun' }
+        '400': { description: This person has no notes to analyse yet }
+        '403': { description: "You don't have access to this record" }
 
   /crm/leads/{id}/ai/draft-email:
     post:
       tags: [CRM]
-      summary: 'AI Tools tab — draft an email — STUB'
+      summary: 'Ask the AI to write a first draft of an email to this person'
+      description: >
+        Pick the purpose. The CRM gives the AI only the facts that purpose needs:
+        a renewal gets the next mortgage to mature (lender, rate, balance,
+        maturity date), a document request gets the documents still missing, a
+        follow-up gets your purpose and their open tasks. You get the draft's id
+        at once (status queued); check it with GET /crm/ai/email-drafts/{id} —
+        usually ready in a few seconds. Nothing is sent: edit it, then save it
+        (POST /crm/leads/{id}/email-drafts) or send it (POST /crm/emails/send).
       security: [{ crmBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1175,29 +1175,75 @@ paths:
               type: object
               required: [intent]
               properties:
-                intent:
-                  {
-                    type: string,
-                    enum: [FOLLOW_UP, RENEWAL, BIRTHDAY, DOCUMENTS, ANNUAL_REVIEW, REFINANCE],
-                  }
+                intent: { type: string, enum: [FOLLOW_UP, RENEWAL, BIRTHDAY, DOCUMENTS, ANNUAL_REVIEW, REFINANCE] }
+                purpose: { type: string, description: 'Why you are writing (needed for FOLLOW_UP)' }
+                tone: { type: string, enum: [professional, warm, concise] }
       responses:
-        '200':
-          description: The draft
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean }
-                  data: { $ref: '#/components/schemas/AiDraftEmail' }
-        '429':
-          description: 'AI paused for the brokerage today (daily cost limit reached)'
+        '202': { description: 'The draft, queued — check it with GET /crm/ai/email-drafts/{id}' }
+        '400': { description: "This person has no email address yet" }
+
+  /crm/ai/email-drafts/{id}:
+    get:
+      tags: [CRM]
+      summary: 'Check an AI email draft (and read it when ready)'
+      description: >
+        status: queued / processing (wait a moment) → ready (show subject and
+        body) or ready_flagged (show it, but give it a closer look: flags say
+        why). blocked_missing_context = a fact is missing (error.missing names
+        it, e.g. no mortgage on file for a renewal). blocked = AI is off or the
+        daily allowance is used up. failed = the draft didn't pass the checks;
+        retry if error.retryable. versions lists every version; ask for an older
+        one with ?version=1.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: version, in: query, required: false, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: '{ id, status, version, subject, body, footer, flags, aiLabel, error, versions }' }
+
+  /crm/ai/email-drafts/{id}/refine:
+    post:
+      tags: [CRM]
+      summary: 'Ask the AI to change a draft ("make it shorter")'
+      description: >
+        Writes the next version from your instruction; the same facts still
+        apply. Check it with GET /crm/ai/email-drafts/{id} like the first one.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [instruction]
+              properties:
+                instruction: { type: string, maxLength: 500 }
+                fromVersion: { type: integer, description: 'Start from this version (default: the latest)' }
+      responses:
+        '202': { description: 'Rewriting — check it again' }
+        '409': { description: 'The draft is not ready yet' }
+
+  /crm/ai/email-drafts/{id}/retry:
+    post:
+      tags: [CRM]
+      summary: 'Try again after a draft failed'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '202': { description: 'Writing again — check it again' }
+        '409': { description: 'Not a failed draft that can be retried' }
 
   /crm/leads/{id}/ai/apply:
     post:
       tags: [CRM]
-      summary: 'Apply reviewed fields — blank fields only (SOW 5.21)'
-      description: Fields the lead already has are never overwritten; they come back in `skipped`.
+      summary: 'Apply an approved AI review to this person — blank fields only'
+      description: >
+        Finalizes the run (undecided values count as rejected), then fills only
+        blank fields unless the broker chose to replace one, and creates the
+        approved applicant, tasks and email draft (saved, never sent).
       security: [{ crmBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1207,23 +1253,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [fields]
+              required: [aiRunId]
               properties:
-                fields:
-                  type: object
-                  additionalProperties: false
-                  properties:
-                    email: { type: string, format: email }
-                    phone: { type: string }
-                    city: { type: string }
-                    propertyAddress: { type: string }
-                    propertyValue: { type: number }
-                    income: { type: number }
-                    monthlyDebts: { type: number }
-                    downPayment: { type: number }
+                aiRunId: { type: string, format: uuid }
       responses:
         '200':
-          description: '{ lead, applied: string[], skipped: string[] }'
+          description: '{ lead, applied: string[], skipped: string[] (already filled), notApplied: [{label, display}] (no CRM field for it) }'
+        '404': { description: The review is not this person's }
 
   /crm/leads/{id}/reveal:
     post:
@@ -1448,8 +1484,10 @@ paths:
       description: >
         Tenant Admin scopes to every person in the brokerage by default
         (narrow with teamId or brokerId); Team Lead is always scoped to
-        their own team (narrow with brokerId). ai-usage ignores both
-        filters — Gen_USG tracks per tenant, not per broker.
+        their own team (narrow with brokerId). ai-usage returns one row per
+        person in scope (AI calls, credits, blocked calls) from the AI gateway
+        for the date range (default: the last 30 days); credits, not dollars,
+        because only the Super Admin sees the real AI cost.
       security: [{ crmBearer: [] }]
       parameters:
         - name: type
@@ -1869,52 +1907,75 @@ paths:
 
   /crm/voice-notes:
     post:
-      summary: 'Voice note → transcript (Flow 4.1) — transcription is a STUB'
+      tags: [CRM]
+      summary: 'Voice note → transcript (Flow 4.1)'
       description: >
-        Send the audio as the raw request body (audio/*, up to 10MB). The
-        recording is always kept (30 days). If AI is switched off or the daily
-        allowance is used up you still get 201 with transcribed false and the
-        reason — retry later with /crm/voice-notes/{id}/transcribe, or type the notes.
+        Send the recording (MP3 or WAV, up to 25MB) as the raw request body. The
+        AI voice service keeps it for 7 days and transcribes it as a job: poll
+        GET /crm/voice-notes/{id} until completed (transcript) or failed (retry,
+        or type the notes). A failure because AI is off or the limit is reached
+        is a failed job with error.code AI_DISABLED / AI_LIMIT_REACHED.
       security: [{ crmBearer: [] }]
       requestBody:
         required: true
         content:
-          audio/webm:
-            schema: { type: string, format: binary }
           audio/mpeg:
             schema: { type: string, format: binary }
-          audio/mp4:
+          audio/wav:
             schema: { type: string, format: binary }
       responses:
-        '201':
-          description: '{ voiceNoteId, transcribed, transcript, reason? }'
+        '202':
+          description: '{ id, status: queued, transcript: null, ... }'
           content:
             application/json:
-              example:
-                success: true
-                data:
-                  {
-                    voiceNoteId: 3f1c…,
-                    transcribed: true,
-                    transcript: '[Placeholder transcript]',
-                    stub: true,
-                  }
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/VoiceNote' }
+        '415': { description: Not MP3 or WAV (detected from the content) }
+
+  /crm/voice-notes/{id}:
+    get:
+      tags: [CRM]
+      summary: 'Did it transcribe? (poll)'
+      description: Only the person who recorded it can read it.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The voice note
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/VoiceNote' }
+        '404': { description: Not found, or not yours }
 
   /crm/voice-notes/{id}/transcribe:
     post:
-      summary: 'Retry transcribing a saved voice note — STUB'
+      tags: [CRM]
+      summary: 'Retry a failed transcription (the recording is kept 7 days)'
       security: [{ crmBearer: [] }]
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: '{ voiceNoteId, transcribed, transcript, reason? }' }
+        '202': { description: The voice note, queued again }
+        '409': { description: Not in a state that can be retried }
 
   /crm/ai/review-notes:
     post:
       tags: [CRM]
-      summary: 'Analyse notes before saving (Flow 4.1 → 4.2) — STUB'
+      summary: 'Analyse notes before saving (Flow 4.1 → 4.2)'
       description: >
-        Stateless: nothing is created, so Discard needs no call. Save = POST /crm/leads with acceptedTasks and draftEmail.
+        Saves the notes in the AI notes service as the sealed original and
+        starts an AI reading (a run). Poll GET /crm/ai/runs/{id}; decide each
+        suggestion with POST /crm/ai/runs/{id}/decisions; Save = POST
+        /crm/leads with aiRunId. Discard = just don't save: nothing is created
+        in the CRM.
       security: [{ crmBearer: [] }]
       requestBody:
         required: true
@@ -1924,27 +1985,124 @@ paths:
               type: object
               required: [notes]
               properties:
-                name: { type: string }
-                notes: { type: string }
+                notes: { type: string, maxLength: 60000 }
                 fields:
-                  {
-                    type: object,
-                    description: 'What is already typed into the form — only used to report what is missing.',
-                  }
+                  type: object
+                  description: 'What the form already holds: masked before the AI sees it, and never silently overwritten.'
+                  properties:
+                    name: { type: string }
+                    email: { type: string, format: email }
+                    phone: { type: string }
+                    income: { type: number }
+                    downPayment: { type: number }
+                    dateOfBirth: { type: string, format: date-time }
+      responses:
+        '202':
+          description: The run, queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/AiRun' }
+
+  /crm/ai/runs/{id}:
+    get:
+      tags: [CRM]
+      summary: 'AI review — poll the run and read its suggestions'
+      description: A run with no person yet is visible to its author only; otherwise to whoever may see the person.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: 'AiReview'
-        '403':
-          description: 'AI switched off in settings'
-        '429':
-          description: 'Daily AI allowance used up'
+          description: The run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/AiRun' }
+        '404': { description: Not found, or not visible to you }
+
+  /crm/ai/runs/{id}/decisions:
+    post:
+      tags: [CRM]
+      summary: 'Accept, edit or reject each suggestion (Flow 4.2)'
+      description: >
+        notes-svc decisions, all or nothing per request. A value that would
+        replace what the person already has needs replaceExisting true (else
+        422 REPLACE_NOT_CONFIRMED); a flagged value must be edited first (422
+        VALUE_NEEDS_EDIT).
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decisions]
+              properties:
+                decisions:
+                  type: array
+                  minItems: 1
+                  maxItems: 300
+                  items:
+                    type: object
+                    required: [suggestionId, decision]
+                    properties:
+                      suggestionId: { type: string }
+                      decision: { type: string, enum: [approved, edited, rejected, pending] }
+                      value: { description: 'The edited value (fields)' }
+                      edits: { type: object, description: 'The edited task or email (title, notes, dueDate, priority, subject, body)' }
+                      replaceExisting: { type: boolean }
+      responses:
+        '200': { description: The run with the decisions applied }
+        '409': { description: Already decided or review closed }
+        '422': { description: REPLACE_NOT_CONFIRMED, VALUE_NEEDS_EDIT or INVALID_VALUE }
+
+  /crm/ai/runs/{id}/retry:
+    post:
+      tags: [CRM]
+      summary: 'Read the notes again after a failed run'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '202': { description: The run, queued again }
+        '409': { description: NOT_RETRYABLE or RUN_ALREADY_LIVE }
 
   /crm/ai/assistant:
     post:
       tags: [CRM]
-      summary: 'AI Assistant (Flow 4.10) — STUB, read-only'
-      description: >
-        Answers only from records the caller may see (own book; a Team Lead sees the team). It cannot create, change, send or delete.
+      summary: 'Ask the AI Assistant a question about your clients (Flow 4.10)'
+      description: |
+        Ask in plain English. The assistant answers **only from records you are allowed to see**
+        (your own clients; a Team Lead also sees the team's) and gives links to the records it used.
+        It only reads: it cannot create, change, send or delete anything.
+
+        **What it can answer:**
+        - Renewals in a period: "Who has renewals in the next 90 days?", "Who renews in March 2027?"
+        - Missing documents: "Which files are missing tax documents?"
+        - Overdue tasks: "Which tasks are overdue?"
+        - One person's file: "Summarize Maria Gonzalez's file" (or send `clientId` when asking from
+          that person's page)
+
+        **How to test:** type a question in `question`, click Execute. To ask a follow-up, send the
+        earlier turns in `history`. Nothing about the conversation is stored.
+
+        **Three kinds of answer** (all HTTP 200), told apart by `status`:
+        - `answered` — `answer` plus `sources` (the records it used, each with a `link`).
+        - `cannot_determine` — "AI cannot determine the answer." `reason` says why:
+          `unsupported_question` (not one of the kinds above, or asks to change something),
+          `no_matching_client` / `client_not_found` (no one you may see by that name),
+          `period_unclear`, `answer_unverifiable`.
+        - `clarification_needed` — the name matched several people; pick one from `candidates`
+          and ask again with its `clientId`.
       security: [{ crmBearer: [] }]
       requestBody:
         required: true
@@ -1954,25 +2112,106 @@ paths:
               type: object
               required: [question]
               properties:
-                question: { type: string }
+                question: { type: string, maxLength: 2000 }
+                history:
+                  type: array
+                  maxItems: 20
+                  description: 'The conversation so far, oldest first (optional)'
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role: { type: string, enum: [user, assistant] }
+                      content: { type: string }
+                clientId:
+                  type: string
+                  format: uuid
+                  description: 'The person whose page you are on (optional)'
       responses:
         '200':
-          description: '{ stub, readOnly: true, answer, records: [{ leadId, name }] }'
+          description: 'The answer (see the three kinds above)'
+          content:
+            application/json:
+              examples:
+                answered:
+                  summary: 'An answer with links'
+                  value:
+                    success: true
+                    data:
+                      status: answered
+                      answer: '- Maria Gonzalez with TD Bank'
+                      partial: false
+                      aiLabel: 'AI-assisted processing'
+                      sources:
+                        - type: mortgage
+                          id: '17c722f7-1de0-429b-9d0a-f14957b56bfe'
+                          clientId: '5bbfe38e-a36e-4628-a6bf-91c00d8c4616'
+                          label: 'Maria Gonzalez'
+                          link: '/clients/5bbfe38e-a36e-4628-a6bf-91c00d8c4616/mortgages/17c722f7-1de0-429b-9d0a-f14957b56bfe'
+                cannotDetermine:
+                  summary: "Couldn't find anything matching that"
+                  value:
+                    success: true
+                    data: { status: cannot_determine, reason: no_matching_client, answer: 'AI cannot determine the answer.', sources: [], aiLabel: 'AI-assisted processing' }
+        '403':
+          description: 'AI features are switched off for you'
         '429':
-          description: 'Daily AI allowance used up — resets at midnight UTC'
+          description: "Brokerage's daily AI allowance is used up — says when it resets"
 
   /crm/leads/{id}/ai/suggest-tasks:
     post:
       tags: [CRM]
-      summary: 'Suggest follow-up tasks (Flow 4.9) — STUB'
-      description: >
-        Stored as suggested tasks for the lead's broker, who approves or dismisses them.
+      summary: 'Ask the AI to suggest follow-up tasks from this person''s notes (Flow 4.9)'
+      description: |
+        The AI reads this person's notes and proposes follow-up tasks ("Call Sam Friday about
+        pre-approval"). Each one is added to the task list as **Suggested** — it is not a real
+        task until you approve it.
+
+        **How to test:** pick a person who has notes (`GET /crm/leads`), paste their id, click
+        Execute.
+        - **202** `ready: false` — the AI is still reading (a few seconds). Click Execute again;
+          the same notes are read only once, so this costs nothing extra.
+        - **200** `ready: true` — `tasks` are the Suggested tasks waiting for you. Then:
+          approve one with `PATCH /crm/tasks/{id}/approve` (it becomes a real task), or dismiss
+          it with `DELETE /crm/tasks/{id}` (it disappears).
+        - `status: failed` — the AI couldn't read the notes; retry with
+          `POST /crm/ai/runs/{runId}/retry`, then call this again.
+
+        Asking again never adds the same task twice.
       security: [{ crmBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
-        '201':
-          description: 'The suggested tasks'
+        '200':
+          description: 'Done — the Suggested tasks waiting for approve or dismiss'
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  ready: true
+                  runId: 'e3f1b6a4-92c7-4d58-a1e0-7c4b9d2f5a68'
+                  status: processed
+                  error: null
+                  tasks:
+                    - id: '0b6c1d2e-4f5a-4b7c-8d9e-1f2a3b4c5d6e'
+                      title: 'Call Sam about pre-approval documents'
+                      dueDate: '2026-10-23T00:00:00.000Z'
+                      priority: MEDIUM
+                      suggested: true
+        '202':
+          description: 'Still reading the notes — call again in a few seconds'
+          content:
+            application/json:
+              example:
+                success: true
+                data: { ready: false, runId: 'e3f1b6a4-92c7-4d58-a1e0-7c4b9d2f5a68', status: processing, error: null, tasks: [] }
+        '400':
+          description: 'This person has no notes yet'
+        '403':
+          description: 'AI features are switched off'
+        '429':
+          description: "Brokerage's daily AI allowance used up"
 
   /crm/leads/{id}/email-drafts:
     post:
@@ -2160,7 +2399,12 @@ paths:
       tags: [CRM]
       summary: 'Upload a file yourself (Flow 4.5)'
       description: >
-        Raw file as the request body. Virus check (stub) → stored → read (OCR stub) → broker reviews the values.
+        Pick the file in Try it out; its type and name go in the boxes above.
+        The file is virus-checked, stored, then read in the background by the AI
+        document service (PDF, JPG, PNG, HEIC, XLSX, XLS, DOCX). The answer comes
+        straight away with readStatus PENDING; you get a notification when it's
+        ready to review (READ / PARTIAL) or couldn't be read (FAILED). Then use
+        GET /crm/documents/{documentId}/review.
       security: [{ crmBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2267,10 +2511,31 @@ paths:
         '409':
           description: 'Connect your email, or send from the system address'
 
-  /crm/documents/{documentId}/apply:
+  /crm/documents/{documentId}/review:
+    get:
+      tags: [CRM]
+      summary: 'See what was read from a document'
+      description: >
+        Every value the AI read, with how sure it is (confidenceLevel high /
+        medium / low), why it might be wrong (flags), the text it came from, and
+        whether you have decided it yet. For mortgage papers, mortgageMatch says
+        which of the person's mortgages it seems to be about. Also refreshes the
+        document's readStatus.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: '{ document: the CRM record, reading: status, fields[], mortgageMatch, warnings, aiLabel }' }
+        '409': { description: The file was not sent for reading yet — retry reading it }
+
+  /crm/documents/{documentId}/decisions:
     post:
       tags: [CRM]
-      summary: 'Accept extracted values — fills blank fields only'
+      summary: 'Accept, edit or reject each value read'
+      description: >
+        Use the field ids from the review. "edited" needs the new value. A value
+        that would replace what the person already has needs replaceExisting
+        true. A value flagged as invalid must be edited before it can be accepted.
       security: [{ crmBearer: [] }]
       parameters:
         - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2280,12 +2545,76 @@ paths:
           application/json:
             schema:
               type: object
-              required: [fields]
+              required: [decisions]
               properties:
-                fields: { type: object }
+                decisions:
+                  type: array
+                  items:
+                    type: object
+                    required: [fieldId, decision]
+                    properties:
+                      fieldId: { type: string }
+                      decision: { type: string, enum: [approved, edited, rejected, pending] }
+                      value: { type: string, description: 'The corrected value, for "edited"' }
+                      replaceExisting: { type: boolean }
       responses:
-        '200':
-          description: 'OK'
+        '200': { description: The reading with your decisions }
+        '422': { description: 'VALUE_NEEDS_EDIT or INVALID_VALUE' }
+
+  /crm/documents/{documentId}/mortgage:
+    put:
+      tags: [CRM]
+      summary: 'Say which mortgage this document is about'
+      description: >
+        Needed before applying when any mortgage value was accepted: one of this
+        person's mortgages ({ "mortgageId" }) or a new one ({ "createNew": true }).
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [mortgageId]
+                  properties: { mortgageId: { type: string, format: uuid } }
+                - type: object
+                  required: [createNew]
+                  properties: { createNew: { type: boolean, enum: [true] } }
+      responses:
+        '200': { description: The reading with the mortgage chosen }
+
+  /crm/documents/{documentId}/retry:
+    post:
+      tags: [CRM]
+      summary: "Try reading a document again (after it couldn't be read)"
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '202': { description: Reading again }
+        '409': { description: Can't be read again (already being reviewed, or the file is gone) }
+
+  /crm/documents/{documentId}/apply:
+    post:
+      tags: [CRM]
+      summary: 'Save the accepted values into the CRM'
+      description: >
+        Closes the review (anything still undecided counts as rejected), then
+        fills only blank fields, unless you chose to replace one. Accepted job
+        details go to the main applicant, complete debts become debt rows, and
+        mortgage values update the mortgage you picked (or create it, when every
+        required detail was accepted). Values the CRM has no place for come back
+        in notApplied.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: '{ lead, applied: string[], skipped: string[] (already filled), notApplied: [{label, display}] }' }
+        '409': { description: 'Still being read, or the mortgage choice is missing' }
+        '422': { description: 'A new mortgage is missing a required detail' }
 
   /crm/documents/{documentId}/download:
     get:
@@ -2466,3 +2795,20 @@ paths:
                     type: object
                     properties:
                       count: { type: integer }
+
+  /crm/webhooks/ai/{service}:
+    post:
+      summary: 'AI services report a finished job here (signed)'
+      description: >
+        Called by the AI services, not by people. Checked with the
+        x-ai-signature header (HMAC over the exact body, 5-minute window).
+      parameters:
+        - { name: service, in: path, required: true, schema: { type: string, enum: [docread] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '204': { description: Received }
+        '401': { description: Signature missing, wrong or too old }

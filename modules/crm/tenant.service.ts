@@ -1,9 +1,9 @@
 import { pipelineCounts, reassignAll } from './lead.service';
 import { getTenantPeople, type TenantPerson } from './modauth.client';
+import { aiUsageReport } from './reports.service';
 import { getPrismaClient } from '../../config/database';
 import { ApiError } from '../../utils/api-error';
 import * as exportService from '../platform/export.service';
-import { getUsageStatus } from '../platform/usage.service';
 
 export interface TenantProfileInput {
   displayName?: string;
@@ -149,7 +149,7 @@ export async function brokerageDashboard(tenantId: string, callerBearerToken: st
       where: { lead: { tenantId }, maturityDate: { gte: new Date(), lte: in90Days } },
     }),
     isProfileComplete(tenantId),
-    getUsageStatus(tenantId),
+    aiUsageReport({ tenantId, brokerIds, from: new Date(), to: new Date() }),
   ]);
   const peopleByRole = people.reduce<Record<string, number>>((acc, p) => {
     acc[p.role] = (acc[p.role] ?? 0) + 1;

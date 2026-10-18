@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 
 import * as affordabilityService from './affordability.service';
+import { createLeadFromReview } from './ai-notes.service';
 import { bookBrokerIds, leadAccessIds } from './crm-auth.middleware';
 import * as dashboardService from './dashboard.service';
 import * as calendarService from './google/calendar.service';
@@ -30,6 +31,17 @@ async function requireOwnTeam(req: Request) {
 
 export const createLeadHandler = asyncHandler(async (req: Request, res: Response) => {
   const user = crmUser(req);
+  if (req.body.aiRunId) {
+    // Flow 4.2 "Save" after the AI review: the lead plus everything the broker approved.
+    const { tenantId, userId, role } = user;
+    const result = await createLeadFromReview(
+      { tenantId, userId, role },
+      await leadAccessIds(user),
+      req.body,
+    );
+    res.status(StatusCodes.CREATED).json({ success: true, data: result });
+    return;
+  }
   const lead = await leadService.createLead(user.tenantId, user.userId, req.body);
   res.status(StatusCodes.CREATED).json({ success: true, data: leadService.maskLead(lead) });
 });

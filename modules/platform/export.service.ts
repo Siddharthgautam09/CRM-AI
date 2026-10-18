@@ -240,7 +240,6 @@ export async function purgeTenantCrmData(tenantId: string): Promise<void> {
   const db = getPrismaClient();
   const files = [
     ...(await db.leadDocument.findMany({ where: { tenantId }, select: { storagePath: true } })),
-    ...(await db.voiceNote.findMany({ where: { tenantId }, select: { storagePath: true } })),
   ];
   // Lead's own children (intake, mortgages, documents, drafts, links) cascade with it.
   await db.$transaction([
@@ -249,7 +248,6 @@ export async function purgeTenantCrmData(tenantId: string): Promise<void> {
     db.lead.deleteMany({ where: { tenantId } }),
     db.contact.deleteMany({ where: { tenantId } }),
     db.notification.deleteMany({ where: { tenantId } }),
-    db.voiceNote.deleteMany({ where: { tenantId } }),
     db.googleConnection.deleteMany({ where: { tenantId } }),
     db.crmUserSettings.deleteMany({ where: { tenantId } }),
     db.tenantProfile.deleteMany({ where: { tenantId } }),

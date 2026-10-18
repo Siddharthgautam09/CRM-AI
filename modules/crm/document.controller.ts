@@ -2,6 +2,7 @@ import type { DocumentType } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 
+import * as aiDocuments from './ai-documents.service';
 import * as bookingService from './booking.service';
 import { leadAccessIds } from './crm-auth.middleware';
 import * as documentService from './document.service';
@@ -61,16 +62,34 @@ export const requestDocumentsHandler = asyncHandler(async (req: Request, res: Re
   res.status(StatusCodes.CREATED).json({ success: true, data });
 });
 
-export const applyDocumentValuesHandler = asyncHandler(async (req: Request, res: Response) => {
-  const user = req.crmUser!;
-  const data = await documentService.applyDocumentValues(
-    user.tenantId,
-    req.params.documentId as string,
-    await leadAccessIds(user),
-    req.body.fields,
-    user.userId,
-  );
-  res.status(StatusCodes.OK).json({ success: true, data });
+// Flow 4.5 review of what the AI document service read (ai-documents.service.ts).
+async function reviewArgs(req: Request) {
+  const { tenantId, userId, role } = req.crmUser!;
+  return [{ tenantId, userId, role }, req.params.documentId as string, await leadAccessIds(req.crmUser!)] as const;
+}
+
+export const getDocumentReviewHandler = asyncHandler(async (req: Request, res: Response) => {
+  res.json({ success: true, data: await aiDocuments.getDocumentReview(...(await reviewArgs(req))) });
+});
+
+export const decideDocumentHandler = asyncHandler(async (req: Request, res: Response) => {
+  const data = await aiDocuments.decideDocument(...(await reviewArgs(req)), req.body.decisions);
+  res.json({ success: true, data });
+});
+
+export const confirmDocumentMortgageHandler = asyncHandler(async (req: Request, res: Response) => {
+  const data = await aiDocuments.confirmDocumentMortgage(...(await reviewArgs(req)), req.body);
+  res.json({ success: true, data });
+});
+
+export const retryDocumentReadHandler = asyncHandler(async (req: Request, res: Response) => {
+  const data = await aiDocuments.retryDocumentRead(...(await reviewArgs(req)));
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data });
+});
+
+export const applyDocumentReviewHandler = asyncHandler(async (req: Request, res: Response) => {
+  const data = await aiDocuments.applyDocumentReview(...(await reviewArgs(req)));
+  res.json({ success: true, data });
 });
 
 export const downloadDocumentHandler = asyncHandler(async (req: Request, res: Response) => {

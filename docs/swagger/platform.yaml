@@ -49,14 +49,14 @@ components:
     UsageStatus:
       type: object
       properties:
-        metric: { type: string, example: ai_cost_daily }
-        outcome: { type: string, enum: [ALLOW, SOFT_WARN_80, SOFT_WARN_95, GRACE, BLOCK] }
+        metric: { type: string, example: ai_cost_cad_daily }
+        outcome: { type: string, enum: [ALLOW, SOFT_WARN_80, SOFT_WARN_95, BLOCK] }
         paused:
           type: boolean
           description: 'true once BLOCK — "has this brokerage hit its daily cost limit?"'
-        current: { type: number, example: 60 }
-        limit: { type: number, example: 50 }
-        pct: { type: number, example: 120 }
+        current: { type: number, description: "Today's real AI cost, CAD", example: 52.4 }
+        limit: { type: number, description: 'Daily cost cap, CAD', example: 50 }
+        pct: { type: number, example: 104.8 }
         overrideExpiresAt:
           type: string
           format: date-time
@@ -268,7 +268,10 @@ paths:
     get:
       tags: [Platform]
       summary: 'Watching AI cost — has this brokerage hit its daily cost limit?'
-      description: Reads current status only (delta=0) — never records usage itself.
+      description: >
+        Today's real AI provider cost for the brokerage against its daily cap,
+        both in CAD, as metered and enforced by the AI gateway. Over the cap the
+        gateway refuses the brokerage's AI calls (429 AI_LIMIT_REACHED).
       security: [{ superAdminBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -288,48 +291,16 @@ paths:
       tags: [Platform]
       summary: Allow extra for today
       description: >
-        Raises today's limit until midnight UTC, then reverts on its own
-        ("resets by itself tomorrow") — no separate "leave it paused" call
-        needed, that's just not calling this endpoint. Takes up to 5 minutes
-        to take effect (gen-usg-starter's own limit cache TTL) — see
-        usage.service.ts's allowExtraToday doc comment.
+        Raises the brokerage's daily AI cost cap to AI_COST_OVERRIDE_LIMIT
+        until the gateway's day ends (midnight America/Toronto), then the
+        default cap comes back on its own ("resets by itself tomorrow"). The
+        gateway applies it to the very next AI call.
       security: [{ superAdminBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
           description: Override active until end of day
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean }
-                  data: { $ref: '#/components/schemas/UsageStatus' }
-
-  /platform/brokerages/{id}/usage/simulate:
-    post:
-      tags: [Platform]
-      summary: (Demo/test only) record simulated AI usage
-      description: >
-        Not part of the Super Admin flow diagrams — this repo has no real AI
-        feature calling Gen_USG's increment() yet, so this is the only way to
-        actually exercise the "AI paused" state end to end.
-      security: [{ superAdminBearer: [] }]
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [deltaUsdCents]
-              properties:
-                deltaUsdCents: { type: integer, example: 60 }
-      responses:
-        '200':
-          description: Usage recorded, current status returned
           content:
             application/json:
               schema:

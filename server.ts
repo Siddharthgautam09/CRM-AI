@@ -5,6 +5,7 @@ import { logger } from './config/logger';
 import { runReminderSweep } from './modules/crm/reminder.service';
 import { purgeCancelledBrokerages } from './modules/platform/brokerage.service';
 import { purgeExpiredExports } from './modules/platform/export.service';
+import { expireAiCostOverrides } from './modules/platform/usage.service';
 
 let server: ReturnType<typeof app.listen> | null = null;
 let exportPurgeInterval: ReturnType<typeof setInterval> | null = null;
@@ -62,6 +63,11 @@ const bootstrap = async (): Promise<void> => {
             if (count > 0) logger.info({ count }, 'Purged cancelled brokerages past retention');
           })
           .catch((error: unknown) => logger.error({ error }, 'Cancelled brokerage purge failed'));
+        expireAiCostOverrides()
+          .then((count) => {
+            if (count > 0) logger.info({ count }, 'Restored default AI cost caps after their day');
+          })
+          .catch((error: unknown) => logger.error({ error }, 'AI cost override expiry failed'));
       },
       60 * 60 * 1000,
     );

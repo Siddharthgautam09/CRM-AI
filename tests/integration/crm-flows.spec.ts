@@ -44,11 +44,13 @@ function tokenFor(sub: string): string {
 
 jest.mock('../../modules/crm/modauth.client');
 jest.mock('../../modules/crm/document-storage');
+jest.mock('../../modules/crm/ai.client');
 jest.mock('../../modules/platform/activity-log');
 jest.mock('../../modules/platform/usage.service');
 jest.mock('../../config/database');
 
 import { getPrismaClient } from '../../config/database';
+import { aiCall } from '../../modules/crm/ai.client';
 import { storeFile } from '../../modules/crm/document-storage';
 import { getModAuthPerson, resolveTeam } from '../../modules/crm/modauth.client';
 import { getUsageStatus } from '../../modules/platform/usage.service';
@@ -63,10 +65,10 @@ const LEAD_ID = '11111111-1111-1111-1111-111111111111';
 const mockPrisma = {
   tenantProfile: { findUnique: jest.fn() },
   lead: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
-  leadDocument: { create: jest.fn() },
+  leadDocument: { create: jest.fn(), update: jest.fn() },
+  mortgage: { findMany: jest.fn() },
   notification: { create: jest.fn() },
   crmUserSettings: { findUnique: jest.fn() },
-  voiceNote: { create: jest.fn(), update: jest.fn() },
 };
 
 function as(role: string, teamId: string | null = null) {
@@ -109,9 +111,20 @@ describe('Flow 0 — a Tenant Admin completes the brokerage profile before anyth
 });
 
 describe('Flow 4.5 — uploads are the raw request body', () => {
-  it('stores a file sent with its type and name in the query string', async () => {
+  it('stores a file sent with its type and name in the query string, then sends it to be read', async () => {
     (storeFile as jest.Mock).mockResolvedValue('tenant-1/key');
     mockPrisma.leadDocument.create.mockImplementation(({ data }) => ({ id: 'doc-1', ...data }));
+    mockPrisma.leadDocument.update.mockImplementation(({ data }) => ({
+      id: 'doc-1',
+      type: 'T4',
+      fileName: 't4.pdf',
+      mimeType: 'application/pdf',
+      storagePath: 'tenant-1/key',
+      readStatus: 'PENDING',
+      ...data,
+    }));
+    mockPrisma.mortgage.findMany.mockResolvedValue([]);
+    (aiCall as jest.Mock).mockResolvedValue({ id: 'ai-doc-1', status: 'queued' });
 
     const res = await request(app)
       .post(`${BASE}/leads/${LEAD_ID}/documents?type=T4&fileName=t4.pdf`)
@@ -125,7 +138,9 @@ describe('Flow 4.5 — uploads are the raw request body', () => {
       fileName: 't4.pdf',
       mimeType: 'application/pdf',
     });
+    expect(res.body.data).toMatchObject({ aiDocumentId: 'ai-doc-1', readStatus: 'PENDING' });
     expect((storeFile as jest.Mock).mock.calls[0][1].toString()).toBe('%PDF-1.4 fake');
+    expect(aiCall).toHaveBeenCalledWith('docread', 'POST', '/v1/documents', expect.anything());
   });
 
   it('rejects an upload without a document type', async () => {
@@ -139,19 +154,30 @@ describe('Flow 4.5 — uploads are the raw request body', () => {
 });
 
 describe('Flow 4.1 — voice note upload', () => {
-  it('takes raw audio, keeps it, and returns the stub transcript', async () => {
-    mockPrisma.voiceNote.create.mockResolvedValue({
+  it('forwards the raw audio to voice-svc as the caller and answers 202 (poll for the transcript)', async () => {
+    (aiCall as jest.Mock).mockResolvedValue({
       id: 'vn-1',
-      tenantId: TENANT_ID,
       userId: USER_ID,
+      status: 'queued',
+      transcript: null,
+      aiLabel: null,
+      durationSec: null,
+      error: null,
+      createdAt: '2026-10-16T00:00:00.000Z',
     });
     const res = await request(app)
       .post(`${BASE}/voice-notes`)
       .set(as('BROKER'))
-      .set('Content-Type', 'audio/webm')
+      .set('Content-Type', 'audio/mpeg')
       .send(Buffer.from('audio'));
-    expect(res.status).toBe(201);
-    expect(res.body.data).toMatchObject({ voiceNoteId: 'vn-1', transcribed: true, stub: true });
+    expect(res.status).toBe(202);
+    expect(res.body.data).toMatchObject({ id: 'vn-1', status: 'queued' });
+    expect(aiCall).toHaveBeenCalledWith(
+      'voice',
+      'POST',
+      '/v1/voice-notes',
+      expect.objectContaining({ caller: expect.objectContaining({ userId: USER_ID, role: 'BROKER' }) }),
+    );
   });
 });
 
@@ -310,7 +336,7 @@ describe("Bad input is the caller's error, not a 500", () => {
       .post(`${BASE}/voice-notes`)
       .set(as('BROKER'))
       .set('Content-Type', 'audio/webm')
-      .send(Buffer.alloc(11 * 1024 * 1024));
+      .send(Buffer.alloc(26 * 1024 * 1024));
     expect(res.status).toBe(413);
   });
 });
