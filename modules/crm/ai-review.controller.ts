@@ -5,6 +5,7 @@ import * as aiAssistant from './ai-assistant.service';
 import * as aiEmail from './ai-email.service';
 import * as aiNotes from './ai-notes.service';
 import * as aiReviewService from './ai-review.service';
+import * as aiSearch from './ai-search.service';
 import { leadAccessIds } from './crm-auth.middleware';
 import { asyncHandler } from '../../utils/async-handler';
 
@@ -123,4 +124,32 @@ export const listEmailIntentsHandler = asyncHandler(async (_req: Request, res: R
     label,
   }));
   res.status(StatusCodes.OK).json({ success: true, data: intents });
+});
+
+// Dashboard "AI suggestions" (assistant-svc recommendations).
+export const refreshRecommendationsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const run = await aiAssistant.refreshRecommendations(aiCaller(req), await leadAccessIds(crmUser(req)));
+  res.status(StatusCodes.ACCEPTED).json({ success: true, data: run });
+});
+
+export const latestRecommendationRunHandler = asyncHandler(async (req: Request, res: Response) => {
+  res.status(StatusCodes.OK).json({ success: true, data: await aiAssistant.latestRecommendationRun(aiCaller(req)) });
+});
+
+export const listRecommendationsHandler = asyncHandler(async (req: Request, res: Response) => {
+  res.status(StatusCodes.OK).json({ success: true, data: await aiAssistant.listRecommendations(aiCaller(req)) });
+});
+
+export const dismissRecommendationHandler = asyncHandler(async (req: Request, res: Response) => {
+  res.status(StatusCodes.OK).json({ success: true, data: await aiAssistant.dismissRecommendation(aiCaller(req), id(req)) });
+});
+
+export const recommendationTaskHandler = asyncHandler(async (req: Request, res: Response) => {
+  const task = await aiAssistant.addRecommendationAsTask(aiCaller(req), await leadAccessIds(crmUser(req)), id(req), req.body);
+  res.status(StatusCodes.CREATED).json({ success: true, data: task });
+});
+
+export const smartSearchHandler = asyncHandler(async (req: Request, res: Response) => {
+  const found = await aiSearch.smartSearch(aiCaller(req), await leadAccessIds(crmUser(req)), req.body.query);
+  res.status(StatusCodes.OK).json({ success: true, data: found });
 });

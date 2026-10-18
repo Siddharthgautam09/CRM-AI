@@ -48,6 +48,7 @@ aiDataRouter.get(
 aiDataRouter.get('/clients/missing-documents', read((req, s) => data.clientsMissingDocuments(s, text(req, 'documentType') || undefined, limit(req))));
 aiDataRouter.get('/tasks/overdue', read((req, s) => data.overdueTasks(s, limit(req))));
 aiDataRouter.get('/clients/search', read((req, s) => data.searchClients(s, text(req, 'q'), limit(req))));
+aiDataRouter.get('/recommendation-candidates', read((req, s) => data.recommendationCandidates(s, text(req, 'type'), limit(req))));
 aiDataRouter.get('/clients/:id/file-summary', read((req, s) => data.fileSummary(s, req.params.id as string)));
 
 export { aiDataRouter };

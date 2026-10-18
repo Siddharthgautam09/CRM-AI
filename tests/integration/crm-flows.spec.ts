@@ -48,6 +48,11 @@ jest.mock('../../modules/crm/ai.client');
 jest.mock('../../modules/platform/activity-log');
 jest.mock('../../modules/platform/usage.service');
 jest.mock('../../config/database');
+// The clamd protocol is tested in tests/unit/document-processing.spec.ts; no scanner runs here.
+jest.mock('../../modules/crm/document-processing', () => ({
+  ...jest.requireActual('../../modules/crm/document-processing'),
+  scanForViruses: jest.fn(async () => ({ clean: true })),
+}));
 
 import { getPrismaClient } from '../../config/database';
 import { aiCall } from '../../modules/crm/ai.client';

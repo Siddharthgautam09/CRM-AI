@@ -106,6 +106,25 @@ export const aiAssistantSchema = z.object({
   params: z.object({}).optional(),
 });
 
+export const aiSearchSchema = z.object({
+  body: z.object({ query: z.string().trim().min(2).max(500) }).strict(),
+  query: z.object({}).optional(),
+  params: z.object({}).optional(),
+});
+
+// Dashboard "AI suggestions" → "Add as task", optionally changed first.
+export const aiRecommendationTaskSchema = z.object({
+  body: z
+    .object({
+      title: z.string().trim().min(1).max(120).optional(),
+      dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+    })
+    .strict(),
+  query: z.object({}).optional(),
+  params: z.object({ id: aiId }),
+});
+
 export const createEmailDraftSchema = z.object({
   body: z.object({
     intent: emailIntent.optional(),

@@ -209,7 +209,7 @@ function columnValue(column: LeadColumn, value: string | number): LeadValues[Lea
   return Number(value);
 }
 
-const PRIORITIES: Record<string, TaskPriority> = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH', urgent: 'HIGH' };
+export const PRIORITIES: Record<string, TaskPriority> = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH', urgent: 'HIGH' };
 
 const isBlank = (v: unknown) => v === null || v === undefined || v === '';
 

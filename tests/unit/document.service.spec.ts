@@ -5,6 +5,13 @@ jest.mock('../../modules/crm/google/gmail.service');
 jest.mock('../../modules/crm/google/google-connection.service');
 jest.mock('../../modules/crm/system-mailer');
 jest.mock('../../modules/crm/ai-documents.service');
+// The real clamd protocol is tested in document-processing.spec.ts against a fake clamd.
+jest.mock('../../modules/crm/document-processing', () => ({
+  ...jest.requireActual('../../modules/crm/document-processing'),
+  scanForViruses: jest.fn(async (data: Buffer) =>
+    data.includes('EICAR-STANDARD-ANTIVIRUS-TEST-FILE') ? { clean: false, virus: 'Eicar-Test-Signature' } : { clean: true },
+  ),
+}));
 
 import { getPrismaClient } from '../../config/database';
 import { sendForReading } from '../../modules/crm/ai-documents.service';
@@ -59,7 +66,7 @@ describe('"What happens to every file that arrives"', () => {
     });
     expect(storeFile).not.toHaveBeenCalled();
     expect(mockPrisma.notification.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ userId: 'me', type: 'document.rejected' }),
+      data: expect.objectContaining({ userId: 'me', type: 'document.rejected', body: 't4.pdf — Eicar-Test-Signature' }),
     });
   });
 

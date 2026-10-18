@@ -1,8 +1,10 @@
 jest.mock('../../modules/platform/activity-log');
 jest.mock('../../config/database');
 jest.mock('../../modules/crm/document-storage');
+jest.mock('../../modules/crm/ai-deletion.service');
 
 import { getPrismaClient } from '../../config/database';
+import { deleteClientsAiData } from '../../modules/crm/ai-deletion.service';
 import { removeStoredFiles } from '../../modules/crm/document-storage';
 import { decryptToken, encryptToken } from '../../modules/crm/encryption';
 import {
@@ -654,6 +656,8 @@ describe('deleteLead — Flow 4.11 "type their name to confirm"', () => {
     expect(mockPrisma.lead.delete).toHaveBeenCalledWith({ where: { id: 'lead-1' } });
     expect(mockPrisma.$transaction).toHaveBeenCalled();
     expect(removeStoredFiles).toHaveBeenCalledWith(['tenant-1/key']);
+    // Their copies in the AI services go too.
+    expect(deleteClientsAiData).toHaveBeenCalledWith(TENANT, ['lead-1']);
     expect(recordActivity).toHaveBeenCalledWith(
       'crm.lead.deleted',
       expect.objectContaining({ targetId: 'lead-1' }),

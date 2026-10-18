@@ -16,11 +16,19 @@ import {
   retryRunHandler,
   retryVoiceNoteHandler,
   suggestTasksHandler,
+  refreshRecommendationsHandler,
+  smartSearchHandler,
+  latestRecommendationRunHandler,
+  listRecommendationsHandler,
+  dismissRecommendationHandler,
+  recommendationTaskHandler,
   uploadVoiceNoteHandler,
 } from './ai-review.controller';
 import {
   aiApplyReviewSchema,
   aiAssistantSchema,
+  aiRecommendationTaskSchema,
+  aiSearchSchema,
   aiDraftEmailSchema,
   aiEmailDraftSchema,
   aiRefineEmailSchema,
@@ -463,6 +471,24 @@ crmRouter.post(
   requireModAuthRole(...AI_USERS),
   validate(aiRefineEmailSchema),
   refineEmailDraftHandler,
+);
+// Smart search (search-svc): people whose files mean what was typed.
+crmRouter.post('/ai/search', requireModAuthRole(...AI_USERS), validate(aiSearchSchema), smartSearchHandler);
+// Dashboard "AI suggestions" (assistant-svc): refresh, list, dismiss, or add one as a real task.
+crmRouter.post('/ai/recommendations/refresh', requireModAuthRole(...AI_USERS), refreshRecommendationsHandler);
+crmRouter.get('/ai/recommendations/latest-run', requireModAuthRole(...AI_USERS), latestRecommendationRunHandler);
+crmRouter.get('/ai/recommendations', requireModAuthRole(...AI_USERS), listRecommendationsHandler);
+crmRouter.post(
+  '/ai/recommendations/:id/dismiss',
+  requireModAuthRole(...AI_USERS),
+  validate(aiIdParamSchema),
+  dismissRecommendationHandler,
+);
+crmRouter.post(
+  '/ai/recommendations/:id/task',
+  requireModAuthRole(...AI_USERS),
+  validate(aiRecommendationTaskSchema),
+  recommendationTaskHandler,
 );
 crmRouter.post(
   '/ai/email-drafts/:id/retry',

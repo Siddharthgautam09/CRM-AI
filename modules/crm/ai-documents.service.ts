@@ -59,7 +59,7 @@ const OUTCOMES: Partial<Record<DocumentReadStatus, { type: string; title: (f: st
  * Moves the CRM's copy to docread's status and tells the broker once — the
  * callback and a review read may both get here, so a repeat changes nothing.
  */
-async function syncStatus(doc: LeadDocument, status: DocumentReadStatus) {
+async function syncStatus(doc: LeadDocument, status: DocumentReadStatus, docreadStatus?: string) {
   if (doc.readStatus === status) return doc;
   const updated = await getPrismaClient().leadDocument.update({
     where: { id: doc.id },
@@ -73,7 +73,11 @@ async function syncStatus(doc: LeadDocument, status: DocumentReadStatus) {
       userId: lead.brokerUserId,
       leadId: lead.id,
       type: outcome.type,
-      title: outcome.title(doc.fileName),
+      // docread's "rejected" (blank, not a document) is final — retrying can't help.
+      title:
+        docreadStatus === 'rejected'
+          ? `Couldn't read ${doc.fileName} — upload a clearer copy, or type the values in`
+          : outcome.title(doc.fileName),
       body: `${lead.name} · ${doc.type}`,
     });
   }
@@ -126,7 +130,7 @@ export async function sendForReading(
       where: { id: doc.id },
       data: { aiDocumentId: ai.id },
     });
-    return syncStatus(sent, READ_STATUS[ai.status]);
+    return syncStatus(sent, READ_STATUS[ai.status], ai.status);
   } catch (error) {
     logger.warn({ error, documentId: doc.id }, 'docread.upload_failed');
     return syncStatus(doc, 'FAILED');
@@ -142,7 +146,7 @@ export async function onDocreadEvent({ data }: AiCallback) {
   // Only ever about our own document, in the brokerage that owns it.
   if (!doc || doc.aiDocumentId !== data.id || doc.tenantId !== data.brokerageId) return;
   const status = READ_STATUS[data.status as DocreadDoc['status']];
-  if (status) await syncStatus(doc, status);
+  if (status) await syncStatus(doc, status, data.status);
 }
 
 // ─── The broker's review ─────────────────────────────────────────
@@ -167,7 +171,7 @@ function aiDocumentId(doc: LeadDocument) {
 export async function getDocumentReview(caller: AiCaller, documentId: string, accessIds: string[]) {
   const { doc } = await accessibleDocument(caller, documentId, accessIds);
   const ai = await aiCall<DocreadDoc>('docread', 'GET', `/v1/documents/${aiDocumentId(doc)}`, { caller });
-  const synced = await syncStatus(doc, READ_STATUS[ai.status]);
+  const synced = await syncStatus(doc, READ_STATUS[ai.status], ai.status);
   const { storagePath, ...document } = synced;
   void storagePath; // the file's location never leaves the server
   return { document, reading: ai };
@@ -216,7 +220,7 @@ export async function retryDocumentRead(caller: AiCaller, documentId: string, ac
     return sendForReading(doc, { data, mimeType: doc.mimeType, fileName: doc.fileName }, lead, doc.uploadedBy as 'BROKER' | 'BORROWER');
   }
   const ai = await aiCall<DocreadDoc>('docread', 'POST', `/v1/documents/${doc.aiDocumentId}/retry`, { caller });
-  return syncStatus(doc, READ_STATUS[ai.status]);
+  return syncStatus(doc, READ_STATUS[ai.status], ai.status);
 }
 
 // ─── Apply what was approved ─────────────────────────────────────

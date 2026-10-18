@@ -72,8 +72,9 @@ describe('onDocreadEvent — "Could the system read it?"', () => {
   it('a rejected or failed read becomes "couldn\'t read it — retry, or type the values in"', async () => {
     mockPrisma.leadDocument.findUnique.mockResolvedValue(DOC);
     await onDocreadEvent(callback({ status: 'rejected' }));
+    // Rejected (blank, not a document) is final: the broker is told to upload a clearer copy, not to retry.
     expect(mockPrisma.notification.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ type: 'document.unreadable' }),
+      data: expect.objectContaining({ type: 'document.unreadable', title: expect.stringContaining('upload a clearer copy') }),
     });
   });
 

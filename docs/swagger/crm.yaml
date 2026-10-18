@@ -534,6 +534,7 @@ paths:
       summary: 'Delete this person permanently (Flow 4.11)'
       description: >
         Body must repeat the person's name exactly. Their tasks stay, marked unlinked. Recorded in the activity log. Broker/Team Lead only.
+        Everything the AI services hold about the person (notes readings, document readings, email drafts, recommendations, voice notes, search index) is deleted too; if an AI service is down, that part is retried every hour until it is done.
       security: [{ crmBearer: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2157,6 +2158,159 @@ paths:
           description: 'AI features are switched off for you'
         '429':
           description: "Brokerage's daily AI allowance is used up — says when it resets"
+
+  /crm/ai/search:
+    post:
+      tags: [CRM]
+      summary: 'Smart search — find people by what their file is about'
+      description: |
+        Type a few words ("vacation property by the water", "client who still owes us tax paperwork") and get back the people
+        whose notes, mortgages, documents and tasks match — only people you may see, best match first.
+        Click one to open their person panel (`leadId`). To find someone **by name**, use the normal
+        search instead: names are hidden from the AI, so they don't help here.
+
+        **How to test:** type words that appear in someone's notes, click Execute. Changes to a file
+        become searchable within about 5 minutes.
+
+        It matches **meaning**, not just words: "freelancer who works for himself" finds a file that
+        says "self-employed". `score` is how close the match is (0 to 1); a whole client file scores
+        lowish (0.2–0.45) even when it is the right one, so read it as a ranking.
+      security: [{ crmBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string, minLength: 2, maxLength: 500 }
+      responses:
+        '200':
+          description: 'The people found (empty list = nothing matched)'
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  aiLabel: 'AI-assisted processing'
+                  results:
+                    - { leadId: 'abf9550c-7c9f-4227-b7e8-5ccfa1c25658', name: 'Sam Patel', stage: NEW, city: null, score: 0.53 }
+        '403':
+          description: 'AI features are switched off'
+        '429':
+          description: "Brokerage's daily AI allowance used up"
+
+  /crm/ai/recommendations/refresh:
+    post:
+      tags: [CRM]
+      summary: 'Dashboard AI suggestions — refresh them'
+      description: |
+        The AI looks over your clients (renewals in the next ~4 months, people who need a follow-up,
+        files missing documents) and suggests what to do next. Takes a few seconds.
+
+        **How to test:** click Execute, then call `GET /crm/ai/recommendations/latest-run` until
+        `status` is `completed`, then `GET /crm/ai/recommendations` to see them. Asking again while
+        one is running (or right after one finished) returns that same run — no extra charge.
+      security: [{ crmBearer: [] }]
+      responses:
+        '202':
+          description: 'Started (or the run already in progress)'
+          content:
+            application/json:
+              example:
+                success: true
+                data: { id: 'acdae274-fc3a-406a-8944-ca355a91b516', status: queued, types: [renewal, follow_up, missing_documents], recommendationCount: 0, warnings: [], error: null, reused: false }
+        '403':
+          description: 'AI features are switched off'
+        '429':
+          description: "Brokerage's daily AI allowance used up"
+
+  /crm/ai/recommendations/latest-run:
+    get:
+      tags: [CRM]
+      summary: 'Dashboard AI suggestions — is the refresh done?'
+      description: '`status`: `queued` / `processing` (wait), `completed` (read the list), `failed` (`error` says why). 404 `NO_RUNS_YET` until the first refresh.'
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: 'The latest refresh'
+          content:
+            application/json:
+              example:
+                success: true
+                data: { id: 'acdae274-fc3a-406a-8944-ca355a91b516', status: completed, recommendationCount: 3, warnings: [], error: null }
+
+  /crm/ai/recommendations:
+    get:
+      tags: [CRM]
+      summary: 'Dashboard AI suggestions — the card'
+      description: |
+        Your current suggestions, most important first. Each says what kind it is (`renewal`,
+        `follow_up`, `missing_documents`), who it is about (`clientId` — open their person panel),
+        why (`reason`), and whether it comes with a ready-made task (`hasSuggestedTask`).
+        Only ever your own; nothing is changed until you act on one.
+      security: [{ crmBearer: [] }]
+      responses:
+        '200':
+          description: 'The suggestions'
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  recommendations:
+                    - id: '4fc21d43-0c55-4a8e-9a43-1d0f7f3b2c11'
+                      type: missing_documents
+                      priority: low
+                      status: new
+                      clientId: '5bbfe38e-a36e-4628-a6bf-91c00d8c4616'
+                      title: 'Request Government photo ID from Maria Gonzalez'
+                      reason: 'The file is missing one required document.'
+                      hasSuggestedTask: true
+                      aiLabel: 'AI-assisted processing'
+
+  /crm/ai/recommendations/{id}/dismiss:
+    post:
+      tags: [CRM]
+      summary: 'Dashboard AI suggestions — dismiss one'
+      description: 'It disappears from the card and is not suggested again for a while.'
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 'Dismissed'
+
+  /crm/ai/recommendations/{id}/task:
+    post:
+      tags: [CRM]
+      summary: 'Dashboard AI suggestions — add it as a real task'
+      description: |
+        Turns the suggestion's ready-made task into a real task on that person (it appears in Tasks,
+        active straight away). Send an empty body `{}` to take it as suggested, or change the
+        `title`, `dueDate` (YYYY-MM-DD, not in the past; `null` for none) or `priority` first.
+        Asking twice gives the same task, never a duplicate.
+      security: [{ crmBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, maxLength: 120 }
+                dueDate: { type: string, format: date, nullable: true }
+                priority: { type: string, enum: [low, medium, high, urgent] }
+      responses:
+        '201':
+          description: 'The task that was created'
+        '404':
+          description: 'No such suggestion, or a person you may not see'
+        '409':
+          description: 'Already added with different changes, or dismissed'
 
   /crm/leads/{id}/ai/suggest-tasks:
     post:

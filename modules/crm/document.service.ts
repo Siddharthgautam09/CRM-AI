@@ -89,7 +89,7 @@ async function ingestFile(
       ...base,
       type: 'document.rejected',
       title: `A file for ${lead.name} failed the virus check and was not stored`,
-      body: file.fileName,
+      body: scan.virus ? `${file.fileName} — ${scan.virus}` : file.fileName,
     });
     throw new ApiError('This file failed the virus check and was not stored', 422);
   }

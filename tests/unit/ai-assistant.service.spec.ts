@@ -7,7 +7,10 @@ import * as assistant from '../../modules/crm/ai-assistant.service';
 import { aiCall } from '../../modules/crm/ai.client';
 import { getModAuthPerson } from '../../modules/crm/modauth.client';
 
-const mockPrisma = { lead: { findFirst: jest.fn(), findMany: jest.fn() } };
+const mockPrisma = {
+  lead: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
+  task: { findUnique: jest.fn(), create: jest.fn() },
+};
 const LEAH = { tenantId: 'tenant-1', userId: 'leah', role: 'TEAM_LEAD' as const };
 
 beforeEach(() => {
@@ -63,5 +66,42 @@ describe('the records', () => {
     expect(found.total).toBe(1);
     const named = await assistant.searchClients(scope, "Summarize Maria Gonzalez's", 10);
     expect(named.records.map((r) => r.id)).toEqual(['l2']);
+  });
+});
+
+describe('dashboard "AI suggestions"', () => {
+  const scope = { tenantId: 'tenant-1', accessIds: ['bob'] };
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+
+  it('follow-up candidates: overdue tasks or no contact for 30 days, longest silence first', async () => {
+    mockPrisma.lead.findMany.mockResolvedValue([
+      { id: 'fresh', name: 'Fresh', createdAt: daysAgo(2), appointments: [], followUps: [], tasks: [] },
+      { id: 'quiet', name: 'Quiet', createdAt: daysAgo(90), appointments: [{ startTime: daysAgo(40) }], followUps: [], tasks: [] },
+      { id: 'late', name: 'Late', createdAt: daysAgo(5), appointments: [], followUps: [], tasks: [{ id: 't1' }] },
+    ]);
+    const { records } = await assistant.recommendationCandidates(scope, 'follow_up', 10);
+    expect(records.map((r) => r.id)).toEqual(['quiet', 'late']);
+    expect(records[0]!.fields).toMatchObject({ daysSinceLastContact: 40, overdueTasks: 0 });
+  });
+
+  it('"Add as task" makes one real task, tells the assistant which, and gives the same task when asked again', async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({ id: 'lead-1', tenantId: 'tenant-1', brokerUserId: 'bob' });
+    (aiCall as jest.Mock).mockImplementation(async (_s: string, _m: string, path: string) => {
+      if (path.endsWith('/create-task')) return { id: 'sug-1', task: null };
+      if (path.endsWith('/decision')) return { id: 'sug-1', task: { title: 'Call Pat', notes: '', dueDate: '2026-11-01', priority: 'high' } };
+      if (path === '/v1/recommendations/rec-1') return { clientId: 'lead-1' };
+      return {};
+    });
+    mockPrisma.task.findUnique.mockResolvedValueOnce(null);
+    mockPrisma.task.create.mockResolvedValue({ id: 'task-1' });
+    await assistant.addRecommendationAsTask(LEAH, ['bob'], 'rec-1', {});
+    expect(mockPrisma.task.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ leadId: 'lead-1', brokerUserId: 'bob', title: 'Call Pat', priority: 'HIGH', aiSuggestionId: 'sug-1' }),
+    });
+    expect(aiCall).toHaveBeenCalledWith('assistant', 'POST', '/v1/task-suggestions/sug-1/handed-off', expect.objectContaining({ json: { crmTaskId: 'task-1' } }));
+
+    mockPrisma.task.findUnique.mockResolvedValueOnce({ id: 'task-1' });
+    await expect(assistant.addRecommendationAsTask(LEAH, ['bob'], 'rec-1', {})).resolves.toEqual({ id: 'task-1' });
+    expect(mockPrisma.task.create).toHaveBeenCalledTimes(1);
   });
 });

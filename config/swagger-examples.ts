@@ -100,6 +100,8 @@ export const REQUEST_EXAMPLES: Record<string, unknown> = {
     tone: 'warm',
   },
   'POST /crm/ai/email-drafts/{id}/refine': { instruction: 'Make it shorter and friendlier' },
+  'POST /crm/ai/search': { query: 'cottage on the lake' },
+  'POST /crm/ai/recommendations/{id}/task': { dueDate: '2026-11-20', priority: 'high' },
   'POST /crm/ai/assistant': { question: 'Which files are missing tax documents?' },
 
   // ── Tasks ──

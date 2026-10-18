@@ -7,6 +7,7 @@ import type { BrokerageExportJobDto, TenantRecord } from './platform.types';
 import { getPrismaClient } from '../../config/database';
 import { env } from '../../config/env';
 import { ApiError } from '../../utils/api-error';
+import { deleteClientsAiData } from '../crm/ai-deletion.service';
 import { removeStoredFiles, storedFilePath } from '../crm/document-storage';
 
 const EXPORT_DIR = path.join(process.cwd(), 'storage', 'brokerage-exports');
@@ -241,6 +242,7 @@ export async function purgeTenantCrmData(tenantId: string): Promise<void> {
   const files = [
     ...(await db.leadDocument.findMany({ where: { tenantId }, select: { storagePath: true } })),
   ];
+  const leads = await db.lead.findMany({ where: { tenantId }, select: { id: true } });
   // Lead's own children (intake, mortgages, documents, drafts, links) cascade with it.
   await db.$transaction([
     db.task.deleteMany({ where: { tenantId } }),
@@ -254,4 +256,6 @@ export async function purgeTenantCrmData(tenantId: string): Promise<void> {
     db.bookingPageSettings.deleteMany({ where: { tenantId } }),
   ]);
   await removeStoredFiles(files.map((f) => f.storagePath));
+  // Their copies in the AI services go too (recorded first, retried hourly if a service is down).
+  await deleteClientsAiData(tenantId, leads.map((l) => l.id));
 }

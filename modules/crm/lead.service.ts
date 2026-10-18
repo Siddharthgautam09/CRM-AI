@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 
+import { deleteClientsAiData } from './ai-deletion.service';
 import { missingDocuments } from './document-processing';
 import { removeStoredFiles } from './document-storage';
 import { decryptToken, encryptToken } from './encryption';
@@ -389,6 +390,8 @@ export async function deleteLead(
     getPrismaClient().lead.delete({ where: { id: lead.id } }),
   ]);
   await removeStoredFiles(documents.map((d) => d.storagePath));
+  // After the CRM delete, so a running AI job can't read the person back in (runbook order).
+  await deleteClientsAiData(tenantId, [lead.id]);
   await recordActivity('crm.lead.deleted', {
     actorId,
     targetType: 'lead',

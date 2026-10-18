@@ -1,6 +1,7 @@
 services:
   app:
     build: .
+    restart: unless-stopped
     ports:
       - '4000:4000'
     env_file:
@@ -19,6 +20,8 @@ services:
       BCRYPT_SALT_ROUNDS: '12'
       DB_CLIENT: prisma
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/template_db
+      # Required by config/env.ts but unused: DB_CLIENT=prisma never connects to Mongo, so there
+      # is no mongodb container. Set DB_CLIENT=mongoose|both only after adding one back.
       MONGODB_URI: mongodb://mongodb:27017/template_db
       # ── modules/platform (Super Admin console) ──────────────────────────
       AUTH_SERVICE_BASE_URL: http://modauth:8102
@@ -37,6 +40,9 @@ services:
       AI_EMAIL_URL: http://host.docker.internal:4205
       AI_ASSISTANT_URL: http://host.docker.internal:4206
       AI_SEARCH_URL: http://host.docker.internal:4207
+      # Flow 4.5 "Virus check clean?" — every uploaded file is scanned here before it is stored.
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: '3310'
       # Where the AI containers send their signed job callbacks back to this API.
       AI_CALLBACK_BASE_URL: http://host.docker.internal:4000
       # "Allow extra for today" raises the brokerage's daily AI cost cap to this (CAD).
@@ -56,16 +62,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      mongodb:
-        condition: service_started
       modauth:
         condition: service_started
       tenant:
         condition: service_started
-      usage-postgres:
-        condition: service_healthy
-      usage-redis:
+      clamav:
         condition: service_started
+
+  # Virus scanner (Flow 4.5). Files never leave the machine. First start downloads the
+  # virus database (~200 MB, a few minutes; kept in clamav_db and refreshed by freshclam).
+  # Until clamd is ready, uploads are refused rather than stored unscanned.
+  clamav:
+    image: clamav/clamav-debian:1.4
+    restart: unless-stopped
+    ports:
+      - '3310:3310'
+    volumes:
+      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+      - clamav_db:/var/lib/clamav
 
   postgres:
     image: postgres:16-alpine
@@ -83,24 +97,20 @@ services:
       timeout: 3s
       retries: 20
 
-  mongodb:
-    image: mongo:7
-    ports:
-      - '27017:27017'
-    volumes:
-      - mongo_data:/data/db
-
   # ── modules/auth — the Java auth service (gen-auth-starter + this repo's
   #    role/terms/invitation additions). Own Postgres/Redis/Mailhog so it
-  #    never touches the Node app's `postgres`/`mongodb` above. Every secret
+  #    never touches the Node app's `postgres` above. Every secret
   #    below is a throwaway dev value, not meant for real deployments.
   modauth:
     build:
       context: .
       dockerfile: modules/auth/Dockerfile
+    restart: unless-stopped
     ports:
       - '8102:8102'
     environment:
+      # Dev-sized JVM: uncapped, Java claims up to a quarter of Docker's memory per service.
+      JAVA_TOOL_OPTIONS: '-Xmx256m -Xss512k -XX:+UseSerialGC -XX:MaxMetaspaceSize=192m -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m'
       AUTH_DB_URL: jdbc:postgresql://auth-postgres:5432/auth_db
       AUTH_DB_USERNAME: postgres
       AUTH_DB_PASSWORD: postgres
@@ -167,9 +177,12 @@ services:
     build:
       context: .
       dockerfile: modules/tenant/Dockerfile
+    restart: unless-stopped
     ports:
       - '8103:8103'
     environment:
+      # Dev-sized JVM: uncapped, Java claims up to a quarter of Docker's memory per service.
+      JAVA_TOOL_OPTIONS: '-Xmx256m -Xss512k -XX:+UseSerialGC -XX:MaxMetaspaceSize=192m -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m'
       TNT_DB_URL: jdbc:postgresql://tenant-postgres:5432/tenant_db
       TNT_DB_USERNAME: postgres
       TNT_DB_PASSWORD: postgres
@@ -203,35 +216,11 @@ services:
     ports:
       - '6381:6379'
 
-  # ── Gen_USG (usage & AI cost) — own Postgres/Redis. POSTGRES_USER=genusg
-  #    is a superuser (Postgres always makes the initdb bootstrap role one),
-  #    needed to run gen-usg-starter's RLS-setting migrations; the app itself
-  #    connects as the unprivileged genusg_app role those migrations create
-  #    (see USAGE_DATABASE_URL on the app service above and README.md for the
-  #    one-time `prisma migrate deploy` step against this container).
-  usage-postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: genusg
-      POSTGRES_USER: genusg
-      POSTGRES_PASSWORD: genusg
-    ports:
-      - '5435:5432'
-    volumes:
-      - usage_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U genusg']
-      interval: 2s
-      timeout: 3s
-      retries: 20
-
-  usage-redis:
-    image: redis:7-alpine
-    ports:
-      - '6382:6379'
 
 volumes:
   postgres_data:
+  clamav_db:
+  # Kept so earlier data survives; their containers (mongodb, usage-postgres) were removed as unused.
   mongo_data:
   auth_postgres_data:
   tenant_postgres_data:

@@ -135,6 +135,8 @@ model Lead {
   // "Recalculate everyone" (Flow 4.4) cache — the tab itself always
   // recomputes live; this is what a book-wide recalculation writes to.
   affordabilitySnapshot Json?
+  // Smart search (search-svc): fingerprint of the text last sent, so only changed people are re-sent.
+  searchHash            String?
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
   tasks                 Task[]
@@ -545,4 +547,20 @@ model Notification {
 model ReminderLog {
   key       String   @id
   createdAt DateTime @default(now())
+}
+
+// Flow 4.11 / Flow 1: a deleted person's copies in the AI services still to be
+// wiped. Each service's delete is idempotent; the ones that failed (service
+// down) stay in `pending` and are retried hourly until none are left.
+model AiDataDeletion {
+  id        String   @id @default(uuid())
+  tenantId  String
+  clientId  String
+  pending   String[]
+  attempts  Int      @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, clientId])
 }

@@ -91,6 +91,9 @@ const envSchema = z.object({
   AI_DATA_API_KEY: z.string().default(''),
 
   // Off in tests; on in the server so reminders/digest/calendar retries run hourly.
+  // Flow 4.5 virus check: clamd's TCP address (docker-compose's `clamav` service).
+  CLAMAV_HOST: z.string().default('localhost'),
+  CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
   CRM_REMINDERS_ENABLED: z
     .enum(['true', 'false'])
     .default('true')
@@ -162,5 +165,6 @@ export const env = {
     documentStorageDir: e.DOCUMENT_STORAGE_DIR,
     documentMaxBytes: e.DOCUMENT_MAX_BYTES,
     remindersEnabled: e.CRM_REMINDERS_ENABLED,
+    clamav: { host: e.CLAMAV_HOST, port: e.CLAMAV_PORT },
   },
 } as const;
